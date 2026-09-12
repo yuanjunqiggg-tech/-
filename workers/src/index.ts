@@ -14,8 +14,17 @@
  *   - SSE 必须用 TransformStream 逐块转发，不能 await 全部读完再返回
  *   - 旁路捕获在流结束（flush）时写库，不阻塞响应
  *   - 提示词替换在请求发出前完成
+ *   - 多设备中继：被控端(云手机) 主动外连领取指令，控制端远程下达
+ *     详见 ./devices.ts
  * ============================================================
  */
+
+import {
+  deviceRegister, deviceHeartbeat, devicePoll, deviceReport,
+  listDevices, getDevice, deleteDevice, patchDevice,
+  pushCommand, getCommand, deviceStream, devicePackets,
+  deviceSessions, deviceOverview,
+} from './devices';
 
 export interface Env {
   DB: D1Database;
@@ -776,8 +785,8 @@ export default {
       return new Response(null, {
         headers: {
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device-Id, X-Device-Token',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         },
       });
     }
@@ -787,12 +796,58 @@ export default {
       return health(req, env);
     }
 
+    // --------------------------------------------------------
+    // ★ 被控端 API（云手机 App 调用，用设备 token 鉴权，不用管理密钥）
+    //   所以这部分必须在 checkAuth 之前分流
+    // --------------------------------------------------------
+    if (path === '/api/v1/device/register' && req.method === 'POST') {
+      return deviceRegister(req, env);
+    }
+    if (path === '/api/v1/device/heartbeat' && req.method === 'POST') {
+      return deviceHeartbeat(req, env);
+    }
+    if (path === '/api/v1/device/poll' && req.method === 'POST') {
+      return devicePoll(req, env);
+    }
+    if (path === '/api/v1/device/report' && req.method === 'POST') {
+      return deviceReport(req, env);
+    }
+
     // 其余全部要求鉴权
     if (!checkAuth(req, env)) {
       return fail('未授权：请提供正确的 Bearer 密钥', 401);
     }
 
     try {
+      // --------------------------------------------------------
+      // ★ 控制端 · 设备管理 API
+      // --------------------------------------------------------
+      if (path === '/api/v1/devices' && req.method === 'GET') {
+        return listDevices(req, env, url);
+      }
+      if (path === '/api/v1/devices/overview' && req.method === 'GET') {
+        return deviceOverview(req, env);
+      }
+      const devMatch = path.match(/^\/api\/v1\/devices\/([^/]+)(\/.*)?$/);
+      if (devMatch) {
+        const devId = decodeURIComponent(devMatch[1]);
+        const sub = devMatch[2] || '';
+
+        if (sub === '' && req.method === 'GET') return getDevice(req, env, devId);
+        if (sub === '' && req.method === 'DELETE') return deleteDevice(req, env, devId, url);
+        if (sub === '' && req.method === 'PATCH') return patchDevice(req, env, devId);
+
+        if (sub === '/command' && req.method === 'POST') return pushCommand(req, env, devId);
+        if (sub === '/stream' && req.method === 'GET') return deviceStream(req, env, devId, url);
+        if (sub === '/packets' && req.method === 'GET') return devicePackets(req, env, devId, url);
+        if (sub === '/sessions' && req.method === 'GET') return deviceSessions(req, env, devId);
+
+        const cmdMatch = sub.match(/^\/command\/([^/]+)$/);
+        if (cmdMatch && req.method === 'GET') {
+          return getCommand(req, env, devId, decodeURIComponent(cmdMatch[1]));
+        }
+      }
+
       // ★ 核心：AI 对话
       if (path === '/api/v1/ai-assist/chat' && req.method === 'POST') {
         return handleChat(req, env);

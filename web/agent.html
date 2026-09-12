@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Prism 被控端</title>
+<style>
+:root{
+  --bg:#ffffff; --bg2:#f7f7f5; --bg3:#f1efe8;
+  --tx:#2c2c2a; --dim:#5f5e5a; --hint:#888780;
+  --bd:rgba(0,0,0,.12);
+  --pri:#185fa5; --pri-bg:#e6f1fb; --pri-bd:#85b7eb;
+  --ok:#0f6e56; --ok-bg:#e1f5ee; --ok-bd:#5dcaa5;
+  --warn:#854f0b; --warn-bg:#faeeda; --warn-bd:#ef9f27;
+  --err:#a32d2d; --err-bg:#fcebeb; --err-bd:#f09595;
+  --r:12px; --rs:8px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%}
+body{
+  font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:14px;line-height:1.6;color:var(--tx);background:var(--bg2);
+  padding:0 0 max(20px,env(safe-area-inset-bottom));
+}
+.wrap{max-width:560px;margin:0 auto;padding:0 14px}
+
+header{
+  background:var(--bg);border-bottom:1px solid var(--bd);
+  padding:calc(16px + env(safe-area-inset-top)) 14px 16px;
+  position:sticky;top:0;z-index:10;
+}
+.hrow{display:flex;align-items:center;gap:10px;max-width:560px;margin:0 auto}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--hint);flex:none}
+.dot.on{background:#1d9e75}
+.dot.off{background:#e24b4a}
+.dot.wait{background:#ef9f27}
+h1{font-size:16px;font-weight:500;margin:0;flex:1}
+.sub{font-size:11.5px;color:var(--hint)}
+
+.card{
+  background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);
+  padding:15px;margin:12px 0;
+}
+.card h2{font-size:13px;font-weight:500;color:var(--dim);margin:0 0 11px}
+
+.field{margin-bottom:11px}
+.field label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
+.field input{
+  width:100%;padding:10px 12px;border:1px solid var(--bd);border-radius:var(--rs);
+  font-family:inherit;font-size:14px;background:var(--bg);color:var(--tx);
+}
+.field input:focus{outline:none;border-color:var(--pri-bd)}
+.field .hint{font-size:11px;color:var(--hint);margin-top:4px}
+
+button{
+  border:1px solid var(--bd);background:var(--bg);color:var(--tx);
+  border-radius:var(--rs);padding:11px 14px;font-size:14px;font-family:inherit;
+  cursor:pointer;width:100%;transition:background .12s;
+}
+button:active{background:var(--bg3)}
+button.pri{background:var(--pri);border-color:var(--pri);color:#fff}
+button.pri:active{opacity:.85}
+button.danger{color:var(--err);border-color:var(--err-bd);background:var(--err-bg)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;gap:8px}
+.row button{flex:1}
+
+/* 设备 ID 展示 */
+.idbox{
+  background:var(--bg3);border-radius:var(--rs);padding:12px;margin-bottom:10px;
+}
+.idbox .lbl{font-size:11px;color:var(--hint);margin-bottom:3px}
+.idbox .val{
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
+  word-break:break-all;line-height:1.5;
+}
+
+/* 状态行 */
+.st{display:flex;justify-content:space-between;align-items:center;
+    padding:9px 0;border-bottom:1px solid var(--bd);font-size:13px}
+.st:last-child{border-bottom:none}
+.st .k{color:var(--dim)}
+.st .v{font-weight:500}
+.v.ok{color:var(--ok)} .v.bad{color:var(--err)} .v.mid{color:var(--warn)}
+
+/* 日志 */
+.logs{
+  background:#2c2c2a;color:#e8e8e5;border-radius:var(--rs);padding:11px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;
+  line-height:1.65;height:240px;overflow-y:auto;
+  white-space:pre-wrap;word-break:break-all;
+}
+.logs .t{color:#888780}
+.logs .ok{color:#7fd3a8}
+.logs .er{color:#f09595}
+.logs .wn{color:#efc07b}
+
+.badge{
+  display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:20px;
+  border:1px solid;margin-left:6px;vertical-align:middle;
+}
+.badge.g{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-bd)}
+.badge.r{color:var(--err);background:var(--err-bg);border-color:var(--err-bd)}
+.badge.a{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-bd)}
+
+.tip{
+  font-size:11.5px;color:var(--hint);line-height:1.7;
+  background:var(--bg3);border-radius:var(--rs);padding:10px;margin-top:10px;
+}
+.qr{
+  background:var(--bg);border:1px solid var(--bd);border-radius:var(--rs);
+  padding:14px;text-align:center;margin:12px 0;
+}
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hrow">
+    <span class="dot" id="dot"></span>
+    <h1>Prism 被控端</h1>
+    <span class="sub" id="hdrSub">未绑定</span>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ============ 未绑定：设置界面 ============ -->
+  <div id="setupView">
+    <div class="card">
+      <h2>连接云端</h2>
+      <div class="field">
+        <label>网关地址</label>
+        <input id="gw" placeholder="https://ai-api.youyuanqi.dpdns.org">
+        <div class="hint">部署 Workers 后得到的地址</div>
+      </div>
+      <div class="field">
+        <label>访问密钥</label>
+        <input id="key" type="password" placeholder="PLATFORM_ACCESS_KEY">
+      </div>
+      <div class="field">
+        <label>本机 Prism 端口</label>
+        <input id="pport" type="number" value="8080">
+        <div class="hint">Prism 启动时显示的端口，默认 8080</div>
+      </div>
+      <div class="field">
+        <label>设备名称</label>
+        <input id="dname" placeholder="如：云手机1号">
+      </div>
+    </div>
+
+    <button class="pri" id="bindBtn" onclick="doBind()">绑定设备</button>
+
+    <div class="tip">
+      绑定后这个 App 会以后台服务常驻运行，自动领取云端指令并执行。
+      请务必在系统设置里允许自启动、关闭电池优化，否则会被系统杀掉。
+    </div>
+  </div>
+
+  <!-- ============ 已绑定：运行界面 ============ -->
+  <div id="runView" class="hidden">
+    <div class="card">
+      <h2>设备凭据</h2>
+      <div class="idbox">
+        <div class="lbl">设备 ID</div>
+        <div class="val" id="devId">–</div>
+      </div>
+      <div class="row">
+        <button onclick="copyTxt(document.getElementById('devId').textContent)">
+          复制设备 ID
+        </button>
+        <button onclick="refreshStatus()">立即检测</button>
+      </div>
+      <div class="tip">
+        在控制台「添加云手机设备」里能看到配对信息。设备 ID 用于在控制台区分不同的云手机。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>运行状态 <span class="badge" id="runBadge">检测中</span></h2>
+      <div class="st"><span class="k">云端连接</span><span class="v" id="sCloud">–</span></div>
+      <div class="st"><span class="k">本机 Prism</span><span class="v" id="sPrism">–</span></div>
+      <div class="st"><span class="k">机器人连服</span><span class="v" id="sBot">–</span></div>
+      <div class="st"><span class="k">所在服务器</span><span class="v" id="sServer">–</span></div>
+      <div class="st"><span class="k">电量</span><span class="v" id="sBat">–</span></div>
+      <div class="st"><span class="k">最后心跳</span><span class="v" id="sHb">–</span></div>
+      <div class="st"><span class="k">已执行指令</span><span class="v" id="sDone">0</span></div>
+    </div>
+
+    <div class="card">
+      <h2>运行日志</h2>
+      <div class="logs" id="logs"></div>
+      <div class="row" style="margin-top:10px">
+        <button onclick="clearLogs()">清空日志</button>
+        <button onclick="restartLoop()">重启循环</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>保活检查</h2>
+      <div id="keepalive"></div>
+      <div class="tip">
+        云手机系统通常会杀后台。如果发现频繁掉线，请检查上面几项。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>解绑</h2>
+      <button class="danger" onclick="doUnbind()">解绑并清除本地数据</button>
+      <div class="tip">
+        解绑后需要重新填写网关和密钥。控制台里对应的设备记录不会自动删除，
+        可以在那边手动清理。
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// 存储
+// ============================================================
+const K = 'prism_agent_v1';
+let st = load();
+
+function load(){
+  try{ return JSON.parse(localStorage.getItem(K)) || {}; }
+  catch(e){ return {}; }
+}
+function save(){ localStorage.setItem(K, JSON.stringify(st)); }
+
+// ============================================================
+// 日志
+// ============================================================
+function log(msg, cls){
+  const box = document.getElementById('logs');
+  const t = new Date().toLocaleTimeString('zh-CN', {hour12:false});
+  const line = document.createElement('div');
+  line.innerHTML = `<span class="t">[${t}]</span> <span class="${cls||''}">${esc(msg)}</span>`;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+  while(box.children.length > 400) box.removeChild(box.firstChild);
+}
+function clearLogs(){ document.getElementById('logs').innerHTML=''; }
+function esc(s){
+  return String(s??'').replace(/[&<>"']/g, c=>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function copyTxt(t){
+  navigator.clipboard?.writeText(t).then(()=>log('已复制','ok')).catch(()=>log('复制失败','er'));
+}
+
+// ============================================================
+// HTTP
+// ============================================================
+async function cloud(path, method='GET', body){
+  const url = (st.gateway||'').replace(/\/$/,'') + path;
+  const r = await fetch(url, {
+    method,
+    headers:{
+      'Content-Type':'application/json',
+      'X-Device-Id': st.device_id || '',
+      'X-Device-Token': st.token || '',
+    },
+    body: body===undefined ? undefined : JSON.stringify(body),
+  });
+  const txt = await r.text();
+  let j; try{ j = JSON.parse(txt); }catch(e){ j = {ok:false, error:txt.slice(0,200)}; }
+  return j;
+}
+
+async function prism(path, timeoutMs=8000){
+  const base = `http://127.0.0.1:${st.prism_port||8080}`;
+  const ctl = new AbortController();
+  const tm = setTimeout(()=>ctl.abort(), timeoutMs);
+  try{
+    const r = await fetch(base+path, {signal:ctl.signal});
+    clearTimeout(tm);
+    return await r.json();
+  }catch(e){
+    clearTimeout(tm);
+    throw e;
+  }
+}
+
+// ============================================================
+// 设备信息（原生桥接，没有则降级）
+// ============================================================
+async function collectMeta(){
+  const m = {
+    platform:'android',
+    model:'', android_ver:'', app_ver:'1.0.0',
+    prism_port: parseInt(st.prism_port||8080),
+    name: st.device_name || '',
+  };
+  // Capacitor / 自定义桥
+  try{
+    if(window.PrismNative?.getDeviceInfo){
+      const d = await window.PrismNative.getDeviceInfo();
+      m.model = d.model || '';
+      m.android_ver = d.osVersion || '';
+      m.battery = d.battery ?? -1;
+    }else if(navigator.userAgent){
+      const ua = navigator.userAgent;
+      const am = ua.match(/Android\s([\d.]+)/);
+      if(am) m.android_ver = am[1];
+      const mm = ua.match(/;\s*([^;)]+)\s+Build/);
+      if(mm) m.model = mm[1].trim();
+    }
+  }catch(e){ /* 忽略 */ }
+  return m;
+}
+
+async function readBattery(){
+  try{
+    if(navigator.getBattery){
+      const b = await navigator.getBattery();
+      return Math.round(b.level*100);
+    }
+  }catch(e){}
+  try{
+    if(window.PrismNative?.getDeviceInfo){
+      const d = await window.PrismNative.getDeviceInfo();
+      return d.battery ?? -1;
+    }
+  }catch(e){}
+  return -1;
+}
+
+// ============================================================
+// 绑定
+// ============================================================
+async function doBind(){
+  const gw = document.getElementById('gw').value.trim().replace(/\/$/,'');
+  const key = document.getElementById('key').value.trim();
+  const port = parseInt(document.getElementById('pport').value||'8080');
+  const name = document.getElementById('dname').value.trim();
+
+  if(!gw){ alert('请填网关地址'); return; }
+  if(!key){ alert('请填访问密钥'); return; }
+
+  st.gateway = gw;
+  st.key = key;
+  st.prism_port = port;
+  st.device_name = name;
+  save();
+
+  const btn = document.getElementById('bindBtn');
+  btn.disabled = true; btn.textContent = '绑定时中…';
+  log('开始绑定设备…');
+
+  try{
+    const meta = await collectMeta();
+    meta.name = name || meta.name;
+    log(`设备信息：${meta.model || '未知型号'} / Android ${meta.android_ver || '?'}`);
+
+    const r = await cloud('/api/v1/device/register', 'POST', meta);
+    if(!r.ok){
+      log('绑定失败：' + (r.error||'未知错误'), 'er');
+      alert('绑定失败：' + (r.error||'未知错误'));
+      btn.disabled = false; btn.textContent = '绑定设备';
+      return;
+    }
+
+    st.device_id = r.data.device_id;
+    st.token = r.data.token;
+    save();
+
+    log('绑定成功！设备 ID：' + st.device_id, 'ok');
+    enterRunView();
+    startLoop();
+
+  }catch(e){
+    log('绑定异常：' + e.message, 'er');
+    alert('绑定异常：' + e.message + '\n\n请检查网关地址是否正确、云手机能否访问外网。');
+    btn.disabled = false; btn.textContent = '绑定设备';
+  }
+}
+
+function doUnbind(){
+  if(!confirm('确定解绑？本地凭据会被清除，需要重新绑定。')) return;
+  stopLoop();
+  localStorage.removeItem(K);
+  st = {};
+  location.reload();
+}
+
+// ============================================================
+// 视图切换
+// ============================================================
+function enterRunView(){
+  document.getElementById('setupView').classList.add('hidden');
+  document.getElementById('runView').classList.remove('hidden');
+  document.getElementById('devId').textContent = st.device_id || '–';
+  document.getElementById('hdrSub').textContent = st.device_name || st.device_id?.slice(-8) || '';
+
+  // 回填设置
+  setTimeout(()=>{
+    const g = document.getElementById('gw'); if(g) g.value = st.gateway||'';
+  }, 0);
+
+  checkKeepalive();
+}
+
+function setDot(cls){
+  document.getElementById('dot').className = 'dot ' + cls;
+}
+
+// ============================================================
+// 状态渲染
+// ============================================================
+let lastHb = 0, doneCount = 0;
+
+function renderStatus(o){
+  const set = (id, txt, cls)=>{
+    const el = document.getElementById(id);
+    el.textContent = txt;
+    el.className = 'v ' + (cls||'');
+  };
+  set('sCloud', o.cloud ? '正常' : '断开', o.cloud?'ok':'bad');
+  set('sPrism', o.prism ? '运行中' : '未运行', o.prism?'ok':'bad');
+  set('sBot',   o.bot ? '已连接' : '未连接', o.bot?'ok':'mid');
+  set('sServer', o.server || '–', '');
+  set('sBat',   o.bat>=0 ? o.bat+'%' : '未知', o.bat>=0&&o.bat<20?'mid':'');
+  set('sHb',    lastHb ? new Date(lastHb).toLocaleTimeString('zh-CN',{hour12:false}) : '–', '');
+  set('sDone',  doneCount, '');
+
+  const badge = document.getElementById('runBadge');
+  if(o.cloud && o.prism && o.bot){ badge.className='badge g'; badge.textContent='全部正常'; }
+  else if(o.cloud && o.prism){ badge.className='badge a'; badge.textContent='等待连服'; }
+  else if(o.cloud){ badge.className='badge a'; badge.textContent='Prism 未启动'; }
+  else { badge.className='badge r'; badge.textContent='云端断开'; }
+
+  setDot(o.cloud ? (o.prism?'on':'wait') : 'off');
+}
+
+async function refreshStatus(){
+  let prismOnline=false, botConnected=false, server='';
+  try{
+    const bot = await prism('/api/bot/status', 6000);
+    prismOnline = true;
+    botConnected = !!bot.connected;
+    server = bot.server || '';
+    log(`Prism 可达 | 机器人${botConnected?'已':'未'}连服` + (server?` [${server}]`:''), 'ok');
+  }catch(e){
+    log('Prism 不可达：' + e.message + '（请确认 Prism 已启动、端口正确）', 'er');
+  }
+
+  let cloudOk = false;
+  try{
+    const r = await cloud('/api/v1/device/heartbeat', 'POST', {
+      prism_online: prismOnline,
+      bot_connected: botConnected,
+      bot_server: server,
+      battery: await readBattery(),
+    });
+    cloudOk = !!r.ok;
+    if(r.ok) lastHb = Date.now();
+    else log('心跳被拒：' + (r.error||'?'), 'er');
+  }catch(e){
+    log('云端不可达：' + e.message, 'er');
+  }
+
+  renderStatus({
+    cloud: cloudOk, prism: prismOnline, bot: botConnected,
+    server, bat: await readBattery(),
+  });
+  return {cloudOk, prismOnline, botConnected, server};
+}
+
+// ============================================================
+// 主循环（长轮询）
+// ============================================================
+let loopRunning = false;
+let loopGen = 0;
+
+function startLoop(){
+  if(loopRunning) return;
+  loopRunning = true;
+  const gen = ++loopGen;
+  log('主循环已启动（长轮询模式）', 'ok');
+
+  (async function run(){
+    let hbAt = 0;
+    while(loopRunning && gen===loopGen){
+      try{
+        // 心跳
+        if(Date.now() - hbAt > 20000){
+          await refreshStatus();
+          hbAt = Date.now();
+        }
+
+        // 领指令
+        const r = await cloud('/api/v1/device/poll', 'POST', {wait:25});
+        if(!r.ok){
+          log('轮询失败：' + (r.error||'?') + '，10 秒后重试', 'wn');
+          await sleep(10000);
+          continue;
+        }
+
+        const cmd = r.data?.command;
+        if(!cmd) continue;
+
+        log(`▶ 收到指令 [${cmd.kind}] ${cmd.id}`, 'ok');
+        await execCommand(cmd);
+        doneCount++;
+        renderStatus({cloud:true, prism:true, bot:true});
+        hbAt = Date.now();
+
+      }catch(e){
+        log('循环异常：' + e.message + '，5 秒后重试', 'er');
+        await sleep(5000);
+      }
+    }
+    log('主循环已停止');
+  })();
+}
+
+function stopLoop(){
+  loopRunning = false;
+  loopGen++;
+}
+
+function restartLoop(){
+  stopLoop();
+  setTimeout(()=>startLoop(), 300);
+  log('正在重启循环…', 'wn');
+}
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// ============================================================
+// 指令执行
+// ============================================================
+let evtBuf = [], flushAt = 0, curCmd = null;
+
+async function flushEvents(force){
+  if(!evtBuf.length) return;
+  if(!force && evtBuf.length < 20 && Date.now()-flushAt < 2000) return;
+  const batch = evtBuf; evtBuf = []; flushAt = Date.now();
+  try{
+    await cloud('/api/v1/device/report', 'POST', {
+      command_id: curCmd?.id, session_id: curCmd?.session_id, events: batch,
+    });
+  }catch(e){ /* 上报失败不中断执行 */ }
+}
+
+async function finishCmd(result, error){
+  await flushEvents(true);
+  try{
+    await cloud('/api/v1/device/report', 'POST', {
+      command_id: curCmd?.id, session_id: curCmd?.session_id,
+      events: [], done: true, result, error,
+    });
+  }catch(e){}
+  if(error) log('指令失败：' + error, 'er');
+  else log('指令完成', 'ok');
+  curCmd = null;
+}
+
+async function execCommand(cmd){
+  curCmd = cmd;
+  const p = cmd.payload || {};
+
+  try{
+    if(cmd.kind === 'chat'){
+      await runChat(p);
+    }else if(cmd.kind === 'tool'){
+      await runTool(p);
+    }else if(cmd.kind === 'packet_sub'){
+      await runPacketSub(p);
+    }else if(cmd.kind === 'packet_send'){
+      await runTool({ tool_name:'send_packet',
+        arguments:{ type:p.packet_type, data:p.data||{} } });
+    }else if(cmd.kind === 'prism_rest'){
+      const r = await prism(p.path||'/api/bot/status', 20000);
+      await finishCmd(r, null);
+    }else{
+      await finishCmd(null, '未知指令类型：' + cmd.kind);
+    }
+  }catch(e){
+    await finishCmd(null, e.message);
+  }
+}
+
+async function runChat(p){
+  const msg = p.message || (p.messages?.[0]?.content) || '';
+  if(!msg){ await finishCmd(null, 'chat 指令缺少 message'); return; }
+  log('对话：' + msg.slice(0,60) + (msg.length>60?'…':''));
+
+  const r = await aiStream({
+    session_name: p.session_name,
+    messages: p.messages || [{role:'user', content:msg}],
+  });
+  await finishCmd({text:r.text, tools:r.tools}, null);
+}
+
+async function runTool(p){
+  const tn = p.tool_name;
+  if(!tn){ await finishCmd(null, 'tool 指令缺少 tool_name'); return; }
+  log('调用工具：' + tn);
+
+  const r = await aiStream({
+    session_name: p.session_name || ('tool-'+Date.now()),
+    messages: [
+      {role:'system', content:
+        '你是工具执行器。用户会指定一个工具名和参数，' +
+        '你必须立即发起该工具的 tool_calls，不要解释、不要闲聊、不要修改参数。' +
+        '只调用这一个工具，然后简短说明结果。'},
+      {role:'user', content:
+        `请立即调用工具 \`${tn}\`，参数如下（JSON）：\n` +
+        `${JSON.stringify(p.arguments||{}, null, 2)}\n\n只调用这一个工具。`},
+    ],
+  });
+
+  const t = r.tools[r.tools.length-1];
+  let parsed = null;
+  if(t){
+    parsed = t.result;
+    if(typeof parsed === 'string'){
+      try{ parsed = JSON.parse(parsed); }catch(e){}
+    }
+  }
+  await finishCmd({
+    ok: !!t && !t.is_error,
+    tool: t?.name,
+    executed: t?.evidence === 'executed',
+    result: parsed,
+    ai_comment: r.text.slice(0,800),
+  }, null);
+}
+
+async function runPacketSub(p){
+  const dur = Math.min(Math.max(parseInt(p.duration||10), 1), 60);
+  const type = p.packet_type || '';
+  log(`开始抓包订阅：${dur} 秒` + (type?`（${type}）`:'（全部）'));
+
+  const deadline = Date.now() + dur*1000;
+  const captured = [];
+  let rounds = 0;
+
+  while(Date.now() < deadline && rounds < 30){
+    rounds++;
+    const r = await aiStream({
+      session_name: 'sub-'+Date.now(),
+      messages: [
+        {role:'system', content:
+          '你是工具执行器。你必须立即调用 wait_packet 工具，不要解释、不要闲聊。只调用这一个工具。'},
+        {role:'user', content:
+          `请立即调用工具 \`wait_packet\`，参数：\n` +
+          `${JSON.stringify(type?{seconds:3, packet_type:type}:{seconds:3})}\n\n只调用这一个工具。`},
+      ],
+    });
+    for(const t of r.tools){
+      if(!t.is_error && t.evidence === 'executed'){
+        captured.push(t.result);
+        evtBuf.push({type:'packet', payload:{raw:t.result, at:Date.now()}});
+        await flushEvents(false);
+      }
+    }
+    log(`抓包轮次 ${rounds}，累计 ${captured.length} 条`);
+  }
+
+  await finishCmd({
+    action:'subscribe', duration:dur, packet_type:type||'(全部)',
+    rounds, captured:captured.length, packets:captured.slice(0,100),
+  }, null);
+}
+
+/**
+ * 调本机 Prism 的 SSE 流，逐块解析并上报
+ */
+async function aiStream(payload){
+  const base = `http://127.0.0.1:${st.prism_port||8080}`;
+  const body = {
+    model_name: payload.model_name || 'prism自动',
+    plugin_id: payload.plugin_id || '',
+    mode: '',
+    session_name: payload.session_name || ('dev-'+Date.now()),
+    messages: payload.messages || [],
+  };
+
+  const resp = await fetch(base + '/api/ai/chat', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body),
+  });
+
+  if(!resp.ok) throw new Error('Prism 返回 HTTP ' + resp.status);
+  if(!resp.body) throw new Error('Prism 未返回流（可能是旧版本）');
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  const text = [], tools = [];
+
+  while(true){
+    const {done, value} = await reader.read();
+    if(done) break;
+    buf += dec.decode(value, {stream:true});
+
+    let idx;
+    while((idx = buf.indexOf('\n\n')) >= 0){
+      const block = buf.slice(0, idx);
+      buf = buf.slice(idx+2);
+
+      let ev = null, data = null;
+      for(const line of block.split('\n')){
+        if(line.startsWith('event:')) ev = line.slice(6).trim();
+        else if(line.startsWith('data:')){
+          try{ data = JSON.parse(line.slice(5).trim()); }
+          catch(e){ data = {raw: line.slice(5).trim()}; }
+        }
+      }
+      if(!ev) continue;
+
+      if(ev === 'ai_chunk' && data?.text){
+        text.push(data.text);
+        evtBuf.push({type:'chunk', payload:{text:data.text}});
+        await flushEvents(false);
+      }else if(ev === 'ai_thinking' && data?.text){
+        evtBuf.push({type:'thinking', payload:{text:data.text}});
+        await flushEvents(false);
+      }else if(ev === 'ai_tool_start'){
+        evtBuf.push({type:'tool_start', payload:data});
+        await flushEvents(true);
+      }else if(ev === 'ai_tool_done'){
+        tools.push(data);
+        evtBuf.push({type:'tool_done', payload:data});
+        await flushEvents(true);
+      }else if(ev === 'ai_usage'){
+        evtBuf.push({type:'usage', payload:data});
+      }else if(ev === 'ai_error'){
+        evtBuf.push({type:'error', payload:data});
+        await flushEvents(true);
+      }
+    }
+  }
+
+  return {text: text.join(''), tools};
+}
+
+// ============================================================
+// 保活检查
+// ============================================================
+function checkKeepalive(){
+  const items = [];
+  const ua = navigator.userAgent || '';
+
+  // 前台服务（原生桥）
+  const hasNative = !!window.PrismNative;
+  items.push({
+    ok: hasNative,
+    name: '原生保活服务',
+    note: hasNative ? '已接入' : '未接入（Web 预览模式下正常）',
+  });
+
+  // 电量优化（无法直接从 Web 读，提示用户自查）
+  items.push({
+    ok: null,
+    name: '电池优化',
+    note: '请到系统设置确认已设为「无限制」',
+  });
+  items.push({
+    ok: null,
+    name: '自启动权限',
+    note: '请到系统设置确认已允许自启动',
+  });
+  items.push({
+    ok: null,
+    name: '云手机后台保活',
+    note: '红手指/多多云等平台通常有独立开关，务必打开',
+  });
+
+  document.getElementById('keepalive').innerHTML = items.map(i=>{
+    const cls = i.ok === true ? 'ok' : i.ok === false ? 'bad' : 'mid';
+    const txt = i.ok === true ? '正常' : i.ok === false ? '未就绪' : '需自查';
+    return `<div class="st">
+      <span class="k">${esc(i.name)}<br>
+        <span style="font-size:11px;color:var(--hint)">${esc(i.note)}</span>
+      </span>
+      <span class="v ${cls}">${txt}</span>
+    </div>`;
+  }).join('');
+}
+
+// ============================================================
+// 启动
+// ============================================================
+(async function init(){
+  if(st.device_id && st.gateway && st.key){
+    log('检测到已绑定设备：' + st.device_id, 'ok');
+    enterRunView();
+    await refreshStatus();
+    startLoop();
+  }else{
+    // 回填已保存的设置
+    if(st.gateway) document.getElementById('gw').value = st.gateway;
+    if(st.key) document.getElementById('key').value = st.key;
+    if(st.prism_port) document.getElementById('pport').value = st.prism_port;
+    if(st.device_name) document.getElementById('dname').value = st.device_name;
+    log('尚未绑定设备，请填写上方信息后点「绑定设备」');
+  }
+
+  // 定时刷新状态
+  setInterval(()=>{ if(st.device_id) refreshStatus(); }, 30000);
+})();
+
+// 页面可见性变化时（云手机切后台回来）重连
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden && st.device_id && !loopRunning){
+    log('页面恢复可见，重启循环', 'wn');
+    startLoop();
+  }
+});
+
+window.addEventListener('online', ()=>{ if(st.device_id) log('网络已恢复','ok'); });
+window.addEventListener('offline', ()=>{ if(st.device_id) log('网络断开','er'); });
+</script>
+</body>
+</html>

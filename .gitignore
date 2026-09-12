@@ -1,28 +1,29 @@
 # 依赖
 node_modules/
-*.log
-npm-debug.log*
-
-# Cloudflare
-.wrangler/
-.dev.vars
-
-# 密钥（重要：不要提交）
-.env
-.env.local
-*.key
-secrets.json
-
-# 系统
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# 编辑器
-.vscode/
-.idea/
+workers/node_modules/
 
 # 构建产物
 dist/
 build/
 *.apk
+*.aab
+*.keystore
+android/
+ios/
+.gradle/
+
+# 本地状态与凭据
+agent_state.json
+.env
+.dev.vars
+wrangler.local.toml
+.wrangler/
+
+# 抓包与日志
+tools/captured_prompts/*.json
+!tools/captured_prompts/.gitkeep
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db

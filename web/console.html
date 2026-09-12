@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<title>Prism 控制台</title>
+<style>
+:root{
+  --bg:#ffffff; --bg2:#f7f7f5; --bg3:#f1efe8;
+  --tx:#2c2c2a; --dim:#5f5e5a; --hint:#888780;
+  --bd:rgba(0,0,0,.12); --bd2:rgba(0,0,0,.24);
+  --pri:#185fa5; --pri-bg:#e6f1fb; --pri-bd:#85b7eb;
+  --ok:#0f6e56; --ok-bg:#e1f5ee; --ok-bd:#5dcaa5;
+  --warn:#854f0b; --warn-bg:#faeeda; --warn-bd:#ef9f27;
+  --err:#a32d2d; --err-bg:#fcebeb; --err-bd:#f09595;
+  --r:12px; --rs:8px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden}
+body{
+  font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  font-size:14px;line-height:1.6;color:var(--tx);background:var(--bg);
+}
+#app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+
+/* ---------- 顶栏 ---------- */
+.topbar{
+  display:flex;align-items:center;gap:10px;padding:10px 14px;
+  border-bottom:1px solid var(--bd);background:var(--bg);flex:none;
+  padding-top:max(10px,env(safe-area-inset-top));
+}
+.tbtn{
+  border:1px solid var(--bd);background:var(--bg);color:var(--tx);
+  border-radius:var(--rs);padding:7px 12px;font-size:13px;cursor:pointer;
+  font-family:inherit;transition:background .12s;
+}
+.tbtn:active{background:var(--bg3)}
+.tbtn.pri{background:var(--pri);border-color:var(--pri);color:#fff}
+.tbtn.pri:active{opacity:.85}
+.tbtn.sm{padding:5px 9px;font-size:12px}
+.tbtn.danger{color:var(--err);border-color:var(--err-bd);background:var(--err-bg)}
+.logo{font-weight:500;font-size:15px}
+.spacer{flex:1}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--hint);flex:none}
+.dot.on{background:#1d9e75}
+.dot.off{background:#e24b4a}
+
+/* ---------- 布局 ---------- */
+.body{flex:1;display:flex;min-height:0;position:relative}
+.sidebar{
+  width:270px;flex:none;border-right:1px solid var(--bd);
+  background:var(--bg2);display:flex;flex-direction:column;min-height:0;
+}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.view{flex:1;display:flex;flex-direction:column;min-height:0}
+.hide{display:none !important}
+
+@media(max-width:760px){
+  .sidebar{
+    position:absolute;inset:0 auto 0 0;z-index:30;width:82%;max-width:320px;
+    transform:translateX(-102%);transition:transform .22s ease;
+    box-shadow:2px 0 18px rgba(0,0,0,.14);
+  }
+  .sidebar.open{transform:translateX(0)}
+  .scrim{position:absolute;inset:0;background:rgba(0,0,0,.32);z-index:20}
+}
+
+/* ---------- 侧栏 ---------- */
+.sect{padding:10px 12px}
+.sect-title{
+  font-size:11px;color:var(--hint);padding:12px 14px 6px;
+  letter-spacing:.4px;font-weight:500;
+}
+.scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1;min-height:0}
+
+/* ---------- 统计卡 ---------- */
+.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px 12px}
+.stat{
+  background:var(--bg);border:1px solid var(--bd);border-radius:var(--rs);
+  padding:9px 11px;
+}
+.stat .n{font-size:19px;font-weight:500;line-height:1.2}
+.stat .l{font-size:11px;color:var(--hint)}
+
+/* ---------- 设备卡 ---------- */
+.dev{
+  display:flex;align-items:center;gap:10px;padding:11px 14px;
+  border-bottom:1px solid var(--bd);cursor:pointer;transition:background .12s;
+  background:var(--bg2);
+}
+.dev:active{background:var(--bg3)}
+.dev.sel{background:var(--pri-bg);border-left:3px solid var(--pri);padding-left:11px}
+.dev .info{flex:1;min-width:0}
+.dev .nm{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dev .sub{font-size:11px;color:var(--hint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tags{display:flex;gap:4px;margin-top:3px;flex-wrap:wrap}
+.tag{
+  font-size:10px;padding:1px 6px;border-radius:20px;border:1px solid;
+  line-height:1.5;
+}
+.tag.g{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-bd)}
+.tag.r{color:var(--err);background:var(--err-bg);border-color:var(--err-bd)}
+.tag.a{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-bd)}
+.tag.b{color:var(--pri);background:var(--pri-bg);border-color:var(--pri-bd)}
+.tag.n{color:var(--dim);background:var(--bg3);border-color:var(--bd)}
+
+/* ---------- 聊天 ---------- */
+.chatarea{
+  flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;
+  display:flex;flex-direction:column;gap:12px;min-height:0;
+}
+.msg{max-width:88%;padding:9px 13px;border-radius:var(--r);font-size:13.5px;
+  white-space:pre-wrap;word-break:break-word;line-height:1.65}
+.msg.u{align-self:flex-end;background:var(--pri);color:#fff;border-bottom-right-radius:3px}
+.msg.a{align-self:flex-start;background:var(--bg2);border:1px solid var(--bd);border-bottom-left-radius:3px}
+.msg.s{align-self:center;background:transparent;color:var(--hint);font-size:12px;padding:2px;
+  max-width:100%;text-align:center}
+.msg.e{align-self:flex-start;background:var(--err-bg);border:1px solid var(--err-bd);color:var(--err);max-width:100%}
+.toolcard{
+  align-self:stretch;max-width:100%;background:var(--bg);border:1px solid var(--bd);
+  border-radius:var(--rs);padding:9px 12px;font-size:12px;
+}
+.toolcard .hd{display:flex;align-items:center;gap:7px;color:var(--dim);font-weight:500}
+.toolcard pre{
+  margin:7px 0 0;padding:8px;background:var(--bg3);border-radius:6px;
+  font-family:var(--font-mono,ui-monospace,Menlo,Consolas,monospace);
+  font-size:11px;line-height:1.5;overflow-x:auto;max-height:260px;overflow-y:auto;
+  white-space:pre-wrap;word-break:break-all;
+}
+.thinking{color:var(--hint);font-style:italic;font-size:12.5px}
+
+/* ---------- 输入条 ---------- */
+.inputbar{
+  display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--bd);
+  background:var(--bg);flex:none;align-items:flex-end;
+  padding-bottom:max(10px,env(safe-area-inset-bottom));
+}
+.inputbar textarea{
+  flex:1;border:1px solid var(--bd);border-radius:10px;padding:9px 12px;
+  font-family:inherit;font-size:14px;resize:none;max-height:130px;line-height:1.5;
+  background:var(--bg);color:var(--tx);
+}
+.inputbar textarea:focus{outline:none;border-color:var(--pri-bd)}
+.sendbtn{
+  width:40px;height:40px;border-radius:10px;border:none;background:var(--pri);
+  color:#fff;font-size:16px;cursor:pointer;flex:none;display:grid;place-items:center;
+}
+.sendbtn:disabled{background:var(--hint);cursor:not-allowed}
+
+/* ---------- 卡片 / 表单 ---------- */
+.card{
+  background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);
+  padding:14px;margin:0 0 12px;
+}
+.card h3{margin:0 0 10px;font-size:13px;font-weight:500;color:var(--dim)}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
+.field input,.field select,.field textarea{
+  width:100%;padding:8px 11px;border:1px solid var(--bd);border-radius:var(--rs);
+  font-family:inherit;font-size:13px;background:var(--bg);color:var(--tx);
+}
+.field textarea{resize:vertical;min-height:70px;line-height:1.55}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--pri-bd)}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.pad{padding:14px;overflow-y:auto;flex:1;min-height:0}
+
+.empty{color:var(--hint);font-size:13px;text-align:center;padding:30px 20px}
+
+/* ---------- 抓包 ---------- */
+.pkt{
+  border-bottom:1px solid var(--bd);padding:9px 0;font-size:12px;
+}
+.pkt .t{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.pkt .nm{font-weight:500;font-family:var(--font-mono,monospace);font-size:11.5px}
+.pkt .tm{color:var(--hint);font-size:11px;flex:none}
+.pkt pre{
+  margin:5px 0 0;padding:6px 8px;background:var(--bg3);border-radius:5px;
+  font-family:var(--font-mono,monospace);font-size:10.5px;max-height:170px;
+  overflow:auto;white-space:pre-wrap;word-break:break-all;
+}
+
+/* ---------- 模态 ---------- */
+.modal{
+  position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:100;
+  display:flex;align-items:center;justify-content:center;padding:18px;
+}
+.mbox{
+  background:var(--bg);border-radius:var(--r);width:100%;max-width:640px;
+  max-height:86vh;overflow-y:auto;padding:18px;
+}
+.mbox h2{margin:0 0 14px;font-size:15px;font-weight:500}
+
+.toast{
+  position:fixed;left:50%;transform:translateX(-50%);bottom:80px;z-index:200;
+  background:#2c2c2a;color:#fff;padding:9px 16px;border-radius:20px;
+  font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;
+  max-width:86vw;text-align:center;
+}
+.toast.show{opacity:.94}
+
+.tabs{display:flex;gap:6px;padding:10px 14px 0;flex:none;overflow-x:auto}
+.tab{
+  padding:6px 13px;border-radius:20px;font-size:12.5px;cursor:pointer;
+  border:1px solid var(--bd);background:var(--bg);white-space:nowrap;
+  font-family:inherit;color:var(--dim);
+}
+.tab.on{background:var(--pri);border-color:var(--pri);color:#fff}
+
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0,0,0,0);white-space:nowrap;border:0}
+</style>
+</head>
+<body>
+<h2 class="sr-only">Prism 多设备控制台：管理云手机设备、下发指令、查看 AI 反馈与抓包数据</h2>
+
+<div id="app">
+  <div class="topbar">
+    <button class="tbtn sm" id="menuBtn" onclick="toggleSidebar()">☰</button>
+    <span class="dot" id="statusDot"></span>
+    <span class="logo">Prism 控制台</span>
+    <span class="spacer"></span>
+    <button class="tbtn sm" onclick="refreshDevices()">刷新</button>
+  </div>
+
+  <div class="body">
+    <!-- ============ 侧栏：设备列表 ============ -->
+    <div class="sidebar" id="sidebar">
+      <div class="sect">
+        <button class="tbtn pri" style="width:100%" onclick="showPairing()">
+          ＋ 添加云手机设备
+        </button>
+      </div>
+
+      <div class="statgrid" id="statGrid">
+        <div class="stat"><div class="n" id="stOnline">–</div><div class="l">在线设备</div></div>
+        <div class="stat"><div class="n" id="stPrism">–</div><div class="l">Prism 运行中</div></div>
+        <div class="stat"><div class="n" id="stBot">–</div><div class="l">机器人已连服</div></div>
+        <div class="stat"><div class="n" id="stPkt">–</div><div class="l">近 1h 抓包</div></div>
+      </div>
+
+      <div class="sect-title">设备列表</div>
+      <div class="scroll" id="deviceList">
+        <div class="empty">暂无设备<br><span style="font-size:12px">点上方按钮添加</span></div>
+      </div>
+    </div>
+
+    <!-- ============ 主区 ============ -->
+    <div class="main">
+      <!-- 未选设备 -->
+      <div class="view" id="viewWelcome">
+        <div class="empty" style="margin-top:18vh">
+          <div style="font-size:15px;color:var(--dim);margin-bottom:6px">请先选择一台设备</div>
+          <div style="font-size:13px">在云手机上装好被控端 App 并完成绑定后，设备会出现在左侧列表</div>
+        </div>
+      </div>
+
+      <!-- 设备工作区 -->
+      <div class="view hide" id="viewDevice">
+        <div class="tabs">
+          <button class="tab on" data-tab="chat" onclick="switchTab('chat')">对话</button>
+          <button class="tab" data-tab="packets" onclick="switchTab('packets')">抓包</button>
+          <button class="tab" data-tab="tools" onclick="switchTab('tools')">工具</button>
+          <button class="tab" data-tab="info" onclick="switchTab('info')">信息</button>
+        </div>
+
+        <!-- 对话 -->
+        <div class="view" id="tabChat">
+          <div class="chatarea" id="chatArea">
+            <div class="empty">对这台设备上的 AI 下达指令</div>
+          </div>
+          <div class="inputbar">
+            <textarea id="input" rows="1" placeholder="例如：写一个自动签到插件"></textarea>
+            <button class="sendbtn" id="sendBtn" onclick="send()">➤</button>
+          </div>
+        </div>
+
+        <!-- 抓包 -->
+        <div class="view hide" id="tabPackets">
+          <div class="pad">
+            <div class="card">
+              <h3>实时订阅</h3>
+              <div class="row">
+                <div class="field" style="flex:1;min-width:110px;margin:0">
+                  <label>时长（秒）</label>
+                  <input id="subDur" type="number" value="15" min="1" max="60">
+                </div>
+                <div class="field" style="flex:2;min-width:150px;margin:0">
+                  <label>包类型（留空=全部）</label>
+                  <input id="subType" placeholder="如 PlayerAuthInput">
+                </div>
+              </div>
+              <button class="tbtn pri" style="width:100%;margin-top:10px" id="subBtn"
+                      onclick="subscribe()">开始订阅</button>
+            </div>
+
+            <div class="card">
+              <h3>历史回看</h3>
+              <div class="row">
+                <div class="field" style="flex:1;min-width:100px;margin:0">
+                  <label>回看（秒）</label>
+                  <input id="histSec" type="number" value="300" min="1">
+                </div>
+                <div class="field" style="flex:2;min-width:140px;margin:0">
+                  <label>包类型</label>
+                  <input id="histType" placeholder="留空=全部">
+                </div>
+              </div>
+              <button class="tbtn" style="width:100%;margin-top:10px" onclick="loadHistory()">
+                查询历史
+              </button>
+            </div>
+
+            <div id="pktStats"></div>
+            <div id="pktList"></div>
+          </div>
+        </div>
+
+        <!-- 工具 -->
+        <div class="view hide" id="tabTools">
+          <div class="pad">
+            <div class="card">
+              <h3>直接调用 Prism 工具</h3>
+              <div class="field">
+                <label>工具名</label>
+                <input id="toolName" list="toolNames" placeholder="如 list_packets">
+                <datalist id="toolNames"></datalist>
+              </div>
+              <div class="field">
+                <label>参数（JSON）</label>
+                <textarea id="toolArgs" placeholder='{"seconds":5}'></textarea>
+              </div>
+              <button class="tbtn pri" style="width:100%" onclick="callTool()">执行</button>
+            </div>
+            <div id="toolResult"></div>
+          </div>
+        </div>
+
+        <!-- 信息 -->
+        <div class="view hide" id="tabInfo">
+          <div class="pad" id="infoBox"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal hide" id="modal">
+  <div class="mbox" id="modalBox"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ============================================================
+// 配置
+// ============================================================
+const CFG_KEY = 'prism_cfg_v2';
+let cfg = loadCfg();
+let devices = [];
+let cur = null;            // 当前设备
+let cursor = 0;            // 事件流游标
+let streaming = false;
+let pollTimer = null;
+let refreshTimer = null;
+let cacheToolList = [];
+
+function loadCfg(){
+  try{
+    return JSON.parse(localStorage.getItem(CFG_KEY)) || {
+      endpoint:'https://ai-api.youyuanqi.dpdns.org', key:''
+    };
+  }catch(e){ return {endpoint:'https://ai-api.youyuanqi.dpdns.org', key:''}; }
+}
+function saveCfg(){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+
+// ============================================================
+// HTTP
+// ============================================================
+async function api(path, opts={}){
+  const url = cfg.endpoint.replace(/\/$/,'') + path;
+  const r = await fetch(url, {
+    ...opts,
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer ' + cfg.key,
+      ...(opts.headers||{})
+    }
+  });
+  const txt = await r.text();
+  let j; try{ j = JSON.parse(txt); }catch(e){ j = {ok:false,error:txt.slice(0,300)}; }
+  return {status:r.status, ...j};
+}
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), 2400);
+}
+
+// ============================================================
+// 设备列表
+// ============================================================
+async function refreshDevices(){
+  if(!cfg.key){
+    document.getElementById('deviceList').innerHTML =
+      '<div class="empty">请先在下方设置访问密钥</div>';
+    showWelcomeWithSettings();
+    return;
+  }
+  const r = await api('/api/v1/devices');
+  const dot = document.getElementById('statusDot');
+  if(!r.ok){
+    dot.className = 'dot off';
+    document.getElementById('deviceList').innerHTML =
+      `<div class="empty">加载失败：${esc(r.error||'未知错误')}</div>`;
+    return;
+  }
+  dot.className = 'dot on';
+  devices = r.data.devices || [];
+  renderStats(r.data.counts || {});
+  renderDevices();
+  // 自动选中第一台
+  if(!cur && devices.length){ selectDevice(devices[0].id); }
+  else if(cur){
+    const still = devices.find(d=>d.id===cur.id);
+    if(still){ cur = still; renderInfo(); }
+  }
+}
+
+async function loadOverview(){
+  const r = await api('/api/v1/devices/overview');
+  if(r.ok){
+    const d = r.data;
+    document.getElementById('stPkt').textContent = d.packets_1h;
+  }
+}
+
+function renderStats(c){
+  document.getElementById('stOnline').textContent = (c.online??0)+'/'+(c.total??0);
+  document.getElementById('stPrism').textContent  = c.prism_running ?? 0;
+  document.getElementById('stBot').textContent    = c.bot_connected ?? 0;
+}
+
+function renderDevices(){
+  const box = document.getElementById('deviceList');
+  if(!devices.length){
+    box.innerHTML = '<div class="empty">暂无设备<br><span style="font-size:12px">点上方按钮添加</span></div>';
+    return;
+  }
+  box.innerHTML = devices.map(d=>{
+    const sel = cur && cur.id===d.id ? ' sel' : '';
+    const tags = [];
+    tags.push(d.online ? '<span class="tag g">在线</span>' : '<span class="tag r">离线</span>');
+    if(d.prism_online) tags.push('<span class="tag b">Prism</span>');
+    if(d.bot_connected) tags.push('<span class="tag g">已连服</span>');
+    if(d.battery>=0) tags.push(`<span class="tag n">${d.battery}%</span>`);
+    const sub = d.online
+      ? (d.bot_server ? '服务器：'+esc(d.bot_server) : '未连接服务器')
+      : '最后心跳 '+fmtAgo(d.idle_sec)+' 前';
+    return `<div class="dev${sel}" onclick="selectDevice('${d.id}')">
+      <span class="dot ${d.online?'on':'off'}"></span>
+      <div class="info">
+        <div class="nm">${esc(d.name||d.id)}</div>
+        <div class="sub">${sub}</div>
+        <div class="tags">${tags.join('')}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function fmtAgo(sec){
+  if(sec<60) return sec+' 秒';
+  if(sec<3600) return Math.floor(sec/60)+' 分钟';
+  if(sec<86400) return Math.floor(sec/3600)+' 小时';
+  return Math.floor(sec/86400)+' 天';
+}
+
+// ============================================================
+// 选择设备
+// ============================================================
+async function selectDevice(id){
+  const r = await api('/api/v1/devices/'+encodeURIComponent(id));
+  if(!r.ok){ toast(r.error||'设备不存在'); return; }
+  cur = r.data.device;
+  cursor = 0;
+  document.getElementById('viewWelcome').classList.add('hide');
+  document.getElementById('viewDevice').classList.remove('hide');
+  document.getElementById('chatArea').innerHTML =
+    '<div class="empty">对这台设备上的 AI 下达指令</div>';
+  renderDevices(); renderInfo(); startPolling();
+  if(window.innerWidth<=760) closeSidebar();
+}
+
+function renderInfo(){
+  if(!cur) return;
+  const d = cur;
+  document.getElementById('infoBox').innerHTML = `
+    <div class="card">
+      <h3>设备信息</h3>
+      <div class="field"><label>名称</label>
+        <input id="infName" value="${esc(d.name||'')}">
+      </div>
+      <div class="field"><label>备注</label>
+        <input id="infMemo" value="${esc(d.memo||'')}">
+      </div>
+      <button class="tbtn pri" style="width:100%" onclick="saveInfo()">保存</button>
+    </div>
+    <div class="card">
+      <h3>运行状态</h3>
+      ${kv('设备 ID', d.id)}
+      ${kv('状态', d.online ? '在线' : '离线')}
+      ${kv('平台', d.platform || '–')}
+      ${kv('型号 / 架构', d.model || '–')}
+      ${kv('系统', d.android_ver || '–')}
+      ${kv('App 版本', d.app_ver || '–')}
+      ${kv('Prism 端口', d.prism_port || 8080)}
+      ${kv('Prism 运行中', d.prism_online ? '是' : '否')}
+      ${kv('机器人已连服', d.bot_connected ? '是' : '否')}
+      ${kv('所连服务器', d.bot_server || '–')}
+      ${kv('电量', d.battery>=0 ? d.battery+'%' : '未知')}
+      ${kv('出口 IP', d.ip_hint || '–')}
+      ${kv('最后心跳', d.last_seen ? new Date(d.last_seen).toLocaleString('zh-CN') : '–')}
+      ${kv('绑定时间', d.created_at ? new Date(d.created_at).toLocaleString('zh-CN') : '–')}
+    </div>
+    <div class="card">
+      <h3>危险操作</h3>
+      <div class="row">
+        <button class="tbtn" onclick="deactivate()">停用设备</button>
+        <button class="tbtn danger" onclick="hardDelete()">彻底删除</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--hint);margin-top:8px">
+        停用后设备无法领取指令，数据保留；彻底删除会清除该设备全部指令、事件与抓包记录。
+      </div>
+    </div>`;
+}
+
+function kv(k,v){
+  return `<div style="display:flex;justify-content:space-between;gap:12px;
+    padding:6px 0;border-bottom:1px solid var(--bd);font-size:12.5px">
+    <span style="color:var(--hint);flex:none">${esc(k)}</span>
+    <span style="text-align:right;word-break:break-all">${esc(String(v))}</span>
+  </div>`;
+}
+
+async function saveInfo(){
+  const name = document.getElementById('infName').value.trim();
+  const memo = document.getElementById('infMemo').value.trim();
+  const r = await api('/api/v1/devices/'+cur.id, {
+    method:'PATCH', body: JSON.stringify({name, memo})
+  });
+  if(r.ok){ toast('已保存'); cur.name=name; cur.memo=memo; renderDevices(); }
+  else toast(r.error||'保存失败');
+}
+
+async function deactivate(){
+  if(!confirm('确定停用该设备？')) return;
+  const r = await api('/api/v1/devices/'+cur.id, {method:'DELETE'});
+  if(r.ok){ toast('已停用'); refreshDevices(); }
+  else toast(r.error||'失败');
+}
+
+async function hardDelete(){
+  if(!confirm('彻底删除将清除该设备所有数据且不可恢复，确定？')) return;
+  if(!confirm('再次确认：真的要删除吗？')) return;
+  const r = await api('/api/v1/devices/'+cur.id+'?hard=1', {method:'DELETE'});
+  if(r.ok){ toast('已删除'); cur=null;
+    document.getElementById('viewDevice').classList.add('hide');
+    document.getElementById('viewWelcome').classList.remove('hide');
+    refreshDevices(); }
+  else toast(r.error||'失败');
+}
+
+// ============================================================
+// 页签
+// ============================================================
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(t=>
+    t.classList.toggle('on', t.dataset.tab===name));
+  ['chat','packets','tools','info'].forEach(t=>{
+    document.getElementById('tab'+t[0].toUpperCase()+t.slice(1))
+      .classList.toggle('hide', t!==name);
+  });
+  if(name==='packets') loadHistory();
+  if(name==='info') renderInfo();
+}
+
+// ============================================================
+// 下发指令 + 事件流轮询
+// ============================================================
+async function send(){
+  if(!cur){ toast('请先选择设备'); return; }
+  if(streaming) return;
+  const ta = document.getElementById('input');
+  const text = ta.value.trim();
+  if(!text) return;
+
+  addMsg('u', text);
+  ta.value=''; ta.style.height='auto';
+  streaming = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  const r = await api('/api/v1/devices/'+cur.id+'/command', {
+    method:'POST',
+    body: JSON.stringify({ kind:'chat', payload:{ message:text, messages:[{role:'user',content:text}] } })
+  });
+
+  if(!r.ok){
+    addMsg('e', r.error || '下发失败');
+    streaming=false; document.getElementById('sendBtn').disabled=false;
+    return;
+  }
+  curCmdId = r.data.command_id;
+  addMsg('s', '指令已下发，等待设备响应…');
+}
+
+async function callTool(){
+  if(!cur){ toast('请先选择设备'); return; }
+  const tn = document.getElementById('toolName').value.trim();
+  if(!tn){ toast('请填工具名'); return; }
+  let args = {};
+  const raw = document.getElementById('toolArgs').value.trim();
+  if(raw){ try{ args = JSON.parse(raw); }catch(e){ toast('参数不是合法 JSON'); return; } }
+
+  const box = document.getElementById('toolResult');
+  box.innerHTML = '<div class="card"><h3>执行中…</h3></div>';
+  const r = await api('/api/v1/devices/'+cur.id+'/command', {
+    method:'POST',
+    body: JSON.stringify({ kind:'tool', payload:{ tool_name:tn, arguments:args } })
+  });
+  if(!r.ok){ box.innerHTML = `<div class="card"><h3>失败</h3><div class="msg e">${esc(r.error)}</div></div>`; return; }
+  const cmdId = r.data.command_id;
+  pollToolResult(cmdId, box);
+}
+
+async function pollToolResult(cmdId, box){
+  let tries = 0;
+  const tick = async ()=>{
+    tries++;
+    const r = await api('/api/v1/devices/'+cur.id+'/command/'+cmdId);
+    if(r.ok && (r.data.command.status==='done'||r.data.command.status==='failed')){
+      const c = r.data.command;
+      const res = c.result ?? {};
+      box.innerHTML = `<div class="card">
+        <h3>执行结果 ${c.status==='done'?'✓':'✗'}</h3>
+        <pre style="margin:0;padding:10px;background:var(--bg3);border-radius:6px;
+          font-size:11px;max-height:400px;overflow:auto;white-space:pre-wrap;
+          word-break:break-all">${esc(JSON.stringify(res,null,2))}</pre>
+      </div>`;
+      return;
+    }
+    if(tries>60){ box.innerHTML='<div class="card"><h3>超时</h3><div class="empty">设备未在预期时间内返回</div></div>'; return; }
+    setTimeout(tick, 1200);
+  };
+  tick();
+}
+
+let curCmdId = null;
+let seenSeq = 0;
+
+function startPolling(){
+  stopPolling();
+  cursor = 0; seenSeq = 0;
+  pollTimer = setInterval(pollStream, 900);
+  refreshTimer = setInterval(refreshDevices, 15000);
+}
+
+function stopPolling(){
+  if(pollTimer) clearInterval(pollTimer);
+  if(refreshTimer) clearInterval(refreshTimer);
+  pollTimer = refreshTimer = null;
+}
+
+async function pollStream(){
+  if(!cur) return;
+  try{
+    const r = await api(`/api/v1/devices/${cur.id}/stream?since=${cursor}&limit=200`);
+    if(!r.ok) return;
+    const evs = r.data.events || [];
+    if(evs.length){
+      cursor = r.data.cursor;
+      for(const e of evs) handleEvent(e);
+    }
+  }catch(e){ /* 网络抖动忽略 */ }
+}
+
+let aiBubble = null;   // 正在流式输出的气泡
+let toolCards = {};    // 工具卡片
+
+function handleEvent(e){
+  const p = e.payload || {};
+  switch(e.type){
+    case 'chunk':
+      if(!aiBubble) aiBubble = addMsg('a','');
+      aiBubble.textContent += (p.text||'');
+      scrollBottom();
+      break;
+    case 'thinking':
+      if(!aiBubble){ aiBubble = addMsg('a',''); aiBubble.classList.add('thinking'); }
+      aiBubble.textContent += (p.text||'');
+      scrollBottom();
+      break;
+    case 'tool_start': {
+      const card = document.createElement('div');
+      card.className='toolcard';
+      card.innerHTML = `<div class="hd">
+        <span class="dot on"></span> 调用工具 ${esc(p.name||'')} …</div>`;
+      document.getElementById('chatArea').appendChild(card);
+      toolCards[p.id] = card;
+      aiBubble = null;
+      scrollBottom();
+      break;
+    }
+    case 'tool_done': {
+      let card = toolCards[p.id];
+      if(!card){
+        card = document.createElement('div');
+        card.className='toolcard';
+        document.getElementById('chatArea').appendChild(card);
+      }
+      const ok = !p.is_error;
+      const resStr = typeof p.result==='string' ? p.result : JSON.stringify(p.result,null,2);
+      card.innerHTML = `<div class="hd">
+          <span class="dot ${ok?'on':'off'}"></span>
+          工具 ${esc(p.name||'')} ${ok?'执行完成':'执行失败'}
+          ${p.evidence==='executed'?'<span class="tag g" style="margin-left:4px">已真实执行</span>':''}
+        </div>
+        <pre>${esc((resStr||'').slice(0,4000))}</pre>`;
+      aiBubble = null;
+      scrollBottom();
+      break;
+    }
+    case 'usage':
+      break;
+    case 'error':
+      addMsg('e', p.error || p.message || '设备侧报错');
+      streaming=false; document.getElementById('sendBtn').disabled=false;
+      break;
+    case 'done':
+      aiBubble = null;
+      // 指令完成
+      if(e.command_id && e.command_id===curCmdId){
+        streaming=false;
+        document.getElementById('sendBtn').disabled=false;
+        curCmdId = null;
+      }
+      break;
+    case 'status':
+      // 设备状态变化，刷新列表即可
+      break;
+  }
+}
+
+// ============================================================
+// 抓包
+// ============================================================
+async function subscribe(){
+  if(!cur){ toast('请先选择设备'); return; }
+  const dur = parseInt(document.getElementById('subDur').value||'15');
+  const type = document.getElementById('subType').value.trim();
+  if(!cur.online){
+    if(!confirm('该设备当前离线，指令可能一直排队。仍然下发？')) return;
+  }
+  const btn = document.getElementById('subBtn');
+  btn.disabled = true; btn.textContent = `订阅中（${dur} 秒）…`;
+  const r = await api('/api/v1/devices/'+cur.id+'/command', {
+    method:'POST',
+    body: JSON.stringify({ kind:'packet_sub', payload:{ duration:dur, packet_type:type } })
+  });
+  btn.disabled = false; btn.textContent = '开始订阅';
+  if(!r.ok){ toast(r.error||'下发失败'); return; }
+  toast(`已下发，设备正在抓包 ${dur} 秒`);
+  setTimeout(loadHistory, (dur+4)*1000);
+}
+
+async function loadHistory(){
+  if(!cur) return;
+  const sec = parseInt(document.getElementById('histSec').value||'300');
+  const type = document.getElementById('histType').value.trim();
+  let q = `/api/v1/devices/${cur.id}/packets?seconds=${sec}&limit=100`;
+  if(type) q += '&type='+encodeURIComponent(type);
+  const r = await api(q);
+  if(!r.ok){ document.getElementById('pktList').innerHTML =
+    `<div class="empty">${esc(r.error||'查询失败')}</div>`; return; }
+
+  const st = r.data.stats || [];
+  document.getElementById('pktStats').innerHTML = st.length ? `
+    <div class="card">
+      <h3>包型统计（近 ${fmtAgo(sec)}）</h3>
+      ${st.map(s=>`<div style="display:flex;justify-content:space-between;padding:4px 0;
+        border-bottom:1px solid var(--bd);font-size:12px">
+        <span style="font-family:monospace">${esc(s.packet_type||'(未知)')}</span>
+        <span style="color:var(--hint)">${s.c} 条</span>
+      </div>`).join('')}
+    </div>` : '';
+
+  const pkts = r.data.packets || [];
+  document.getElementById('pktList').innerHTML = pkts.length ? `
+    <div class="card">
+      <h3>数据包（${pkts.length} 条，最新在前）</h3>
+      ${pkts.map(p=>`<div class="pkt">
+        <div class="t">
+          <span class="nm">${esc(p.packet_type||'?')} <span style="color:var(--hint)">#${p.packet_id??'–'}</span></span>
+          <span class="tm">${new Date(p.captured_at).toLocaleTimeString('zh-CN')}</span>
+        </div>
+        <pre>${esc(typeof p.fields==='string'?p.fields:JSON.stringify(p.fields,null,2))}</pre>
+      </div>`).join('')}
+    </div>` : `<div class="empty">该时间窗口内没有抓包记录</div>`;
+}
+
+// ============================================================
+// 添加设备（配对）
+// ============================================================
+function showPairing(){
+  const base = cfg.endpoint.replace(/\/$/,'');
+  openModal(`
+    <h2>添加云手机设备</h2>
+    <div style="font-size:13px;color:var(--dim);line-height:1.75;margin-bottom:14px">
+      在被控端 App 里填入下面两项，保存后设备会自动出现在左侧列表。
+    </div>
+    <div class="card" style="margin:0 0 10px">
+      <h3>网关地址</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <code id="pairUrl" style="flex:1;font-size:11.5px;word-break:break-all;
+          background:var(--bg3);padding:8px;border-radius:6px">${esc(base)}</code>
+        <button class="tbtn sm" onclick="copyText('${esc(base)}')">复制</button>
+      </div>
+    </div>
+    <div class="card" style="margin:0 0 10px">
+      <h3>访问密钥</h3>
+      <div style="display:flex;gap:8px;align-items:center">
+        <code style="flex:1;font-size:11.5px;word-break:break-all;
+          background:var(--bg3);padding:8px;border-radius:6px">${cfg.key?esc(cfg.key):'（尚未设置）'}</code>
+        ${cfg.key?`<button class="tbtn sm" onclick="copyText('${esc(cfg.key)}')">复制</button>`:''}
+      </div>
+    </div>
+    <div class="card" style="margin:0 0 10px">
+      <h3>操作步骤</h3>
+      <ol style="margin:0;padding-left:20px;font-size:12.5px;line-height:1.9;color:var(--dim)">
+        <li>在云手机上安装 <b>Prism 被控端</b> App</li>
+        <li>打开 App，填入上面的网关地址和密钥</li>
+        <li>点「绑定设备」，App 会显示一个设备 ID</li>
+        <li>回到这里点「刷新」，设备就出现了</li>
+      </ol>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="tbtn" onclick="closeModal()">关闭</button>
+      <button class="tbtn pri" onclick="closeModal();refreshDevices()">刷新列表</button>
+    </div>
+  `);
+}
+
+function showWelcomeWithSettings(){
+  document.getElementById('viewWelcome').innerHTML = `
+    <div class="pad" style="max-width:520px;margin:0 auto;width:100%">
+      <div class="card">
+        <h3>首次使用 · 设置访问密钥</h3>
+        <div class="field">
+          <label>网关地址</label>
+          <input id="cfgEndpoint" value="${esc(cfg.endpoint)}" placeholder="https://ai-api.youyuanqi.dpdns.org">
+        </div>
+        <div class="field">
+          <label>访问密钥（PLATFORM_ACCESS_KEY）</label>
+          <input id="cfgKey" type="password" value="${esc(cfg.key)}" placeholder="部署 Workers 时设置的密钥">
+        </div>
+        <button class="tbtn pri" style="width:100%;padding:11px" onclick="applySettings()">
+          保存并连接
+        </button>
+        <div style="font-size:11.5px;color:var(--hint);margin-top:10px;line-height:1.7">
+          密钥保存在本机浏览器，不会外传。填错会一直显示「加载失败」。
+        </div>
+      </div>
+    </div>`;
+}
+
+function applySettings(){
+  cfg.endpoint = document.getElementById('cfgEndpoint').value.trim().replace(/\/$/,'');
+  cfg.key = document.getElementById('cfgKey').value.trim();
+  saveCfg();
+  document.getElementById('viewWelcome').innerHTML =
+    '<div class="empty" style="margin-top:18vh">正在连接…</div>';
+  refreshDevices();
+}
+
+// ============================================================
+// UI 工具
+// ============================================================
+function addMsg(kind, text){
+  const area = document.getElementById('chatArea');
+  const em = area.querySelector('.empty');
+  if(em) em.remove();
+  const d = document.createElement('div');
+  d.className = 'msg ' + kind;
+  d.textContent = text;
+  area.appendChild(d);
+  scrollBottom();
+  return d;
+}
+
+function scrollBottom(){
+  const a = document.getElementById('chatArea');
+  a.scrollTop = a.scrollHeight;
+}
+
+function esc(s){
+  return String(s??'').replace(/[&<>"']/g, c=>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function openModal(html){
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modal').classList.remove('hide');
+}
+function closeModal(){ document.getElementById('modal').classList.add('hide'); }
+document.getElementById('modal').addEventListener('click', e=>{
+  if(e.target.id==='modal') closeModal();
+});
+
+function copyText(t){
+  navigator.clipboard?.writeText(t)
+    .then(()=>toast('已复制'))
+    .catch(()=>toast('复制失败，请手动选择'));
+}
+
+function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); }
+function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); }
+
+// 输入框自适应高度
+const ta = document.getElementById('input');
+ta.addEventListener('input', ()=>{
+  ta.style.height='auto';
+  ta.style.height = Math.min(ta.scrollHeight, 130)+'px';
+});
+ta.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey && window.innerWidth>760){
+    e.preventDefault(); send();
+  }
+});
+
+// ============================================================
+// 启动
+// ============================================================
+if(cfg.key){
+  refreshDevices();
+  loadOverview();
+  setInterval(loadOverview, 60000);
+}else{
+  showWelcomeWithSettings();
+}
+</script>
+</body>
+</html>

@@ -7,8 +7,10 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute ds-platform --file=./sql/schema.sql",
-    "db:init:remote": "wrangler d1 execute ds-platform --remote --file=./sql/schema.sql",
+    "typecheck": "tsc --noEmit",
+    "db:init": "wrangler d1 execute ds-platform --file=../sql/schema.sql",
+    "db:init:remote": "wrangler d1 execute ds-platform --remote --file=../sql/schema.sql",
+    "db:devices": "wrangler d1 execute ds-platform --remote --file=../sql/schema_devices.sql",
     "tail": "wrangler tail"
   },
   "devDependencies": {
