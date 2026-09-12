@@ -1,0 +1,28 @@
+# 依赖
+node_modules/
+*.log
+npm-debug.log*
+
+# Cloudflare
+.wrangler/
+.dev.vars
+
+# 密钥（重要：不要提交）
+.env
+.env.local
+*.key
+secrets.json
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+
+# 构建产物
+dist/
+build/
+*.apk

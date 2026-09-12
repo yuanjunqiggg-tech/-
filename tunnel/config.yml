@@ -1,0 +1,77 @@
+# ============================================================
+# Ds Platform · Cloudflare Tunnel 配置（新增 Prism 映射）
+#
+# 隧道 ID：9648bb44-14b6-493c-81d2-e0fae070d95a（复用现有）
+# 域名：youyuanqi.dpdns.org
+#
+# ★ 本次新增：把本机 Prism 工具箱的 Web 服务暴露到
+#   prism.youyuanqi.dpdns.org
+#
+# 分流规则（按顺序匹配，命中即停）：
+#   prism 子域 → 本机 Prism 端口（★ 需替换 <PRISM_PORT>）
+#   api 子域   → 后端 3000（原有）
+#   tunnel 子域 → 本机模型服务（原有）
+# ============================================================
+
+tunnel: 9648bb44-14b6-493c-81d2-e0fae070d95a
+credentials-file: C:\Users\16650\.cloudflared\9648bb44-14b6-493c-81d2-e0fae070d95a.json
+
+# 全局设置
+originRequest:
+  connectTimeout: 30s
+  noTLSVerify: true          # 本机服务无证书
+  # SSE 长连接关键设置
+  disableChunkedEncoding: false
+  noHappyEyeballs: false
+
+ingress:
+  # ------------------------------------------------------------
+  # ★ 新增：Prism 工具箱 Web 服务
+  #    把 <PRISM_PORT> 替换成 Prism 启动时显示的端口号
+  #    用途：AI 帮写的外部入口
+  # ------------------------------------------------------------
+  - hostname: prism.youyuanqi.dpdns.org
+    path: /api/ai/*
+    service: http://localhost:<PRISM_PORT>
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: true
+      # SSE 流式必须关闭缓冲
+      disableChunkedEncoding: false
+      httpHostHeader: localhost
+
+  - hostname: prism.youyuanqi.dpdns.org
+    path: /api/plugin/*
+    service: http://localhost:<PRISM_PORT>
+    originRequest:
+      noTLSVerify: true
+      httpHostHeader: localhost
+
+  - hostname: prism.youyuanqi.dpdns.org
+    service: http://localhost:<PRISM_PORT>
+    originRequest:
+      noTLSVerify: true
+      httpHostHeader: localhost
+
+  # ------------------------------------------------------------
+  # 原有：后端 API（保留）
+  # ------------------------------------------------------------
+  - hostname: api.youyuanqi.dpdns.org
+    path: /api/*
+    service: http://localhost:3000
+
+  - hostname: api.youyuanqi.dpdns.org
+    path: /socket.io/*
+    service: http://localhost:3000
+
+  - hostname: api.youyuanqi.dpdns.org
+    service: http://localhost:3000
+
+  # ------------------------------------------------------------
+  # 原有：本机模型服务（Codex / Ollama）
+  # ------------------------------------------------------------
+  - hostname: tunnel.youyuanqi.dpdns.org
+    service: http://localhost:11434
+
+  # 兜底（cloudflared 要求必须有一条无 hostname 的规则）
+  - service: http_status:404

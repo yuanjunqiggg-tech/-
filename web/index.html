@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0a0f">
+<title>AI 帮写 · 控制台</title>
+<style>
+  :root{
+    --bg:#0a0a0f; --panel:#14141c; --panel2:#1c1c26; --border:#2a2a38;
+    --text:#e8e8f0; --dim:#8b8b9e; --accent:#4f8cff; --accent2:#7c5cff;
+    --ok:#3ecf8e; --warn:#ffb454; --err:#ff5c5c;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:15px;line-height:1.5;overflow:hidden}
+  button{font-family:inherit;font-size:inherit;cursor:pointer;border:none;outline:none}
+  input,textarea{font-family:inherit;font-size:inherit;outline:none}
+
+  /* 布局 */
+  #app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+  .topbar{flex-shrink:0;display:flex;align-items:center;gap:10px;padding:10px 14px;
+    background:var(--panel);border-bottom:1px solid var(--border)}
+  .logo{font-weight:800;font-size:16px;letter-spacing:.5px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex-shrink:0}
+  .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.off{background:var(--err)}
+  .spacer{flex:1}
+  .tbtn{padding:6px 11px;border-radius:8px;background:var(--panel2);color:var(--text);
+    font-size:13px;border:1px solid var(--border);white-space:nowrap}
+  .tbtn:active{background:var(--border)}
+  .tbtn.pri{background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;font-weight:600}
+
+  .body{flex:1;display:flex;min-height:0;overflow:hidden}
+  .sidebar{width:250px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;overflow:hidden}
+  .sidebar.hide{display:none}
+  .sect{padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+  .sect-title{font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;
+    letter-spacing:1px;margin-bottom:8px}
+  .slist{flex:1;overflow-y:auto;padding:6px}
+  .sitem{padding:9px 10px;border-radius:8px;margin-bottom:3px;cursor:pointer;font-size:13px}
+  .sitem:hover{background:var(--panel2)}
+  .sitem.act{background:var(--accent);color:#fff}
+  .sitem .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sitem .s{font-size:11px;color:var(--dim);margin-top:2px}
+  .sitem.act .s{color:rgba(255,255,255,.75)}
+
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+  .view{flex:1;overflow-y:auto;padding:16px}
+  .view.hide{display:none}
+
+  /* 聊天气泡 */
+  .msg{margin-bottom:14px;display:flex;flex-direction:column;max-width:100%}
+  .msg .role{font-size:11px;font-weight:700;color:var(--dim);margin-bottom:4px;letter-spacing:.5px}
+  .bubble{padding:10px 13px;border-radius:12px;white-space:pre-wrap;word-break:break-word;
+    overflow-wrap:anywhere;max-width:100%}
+  .msg.user .bubble{background:var(--accent);color:#fff;align-self:flex-end;
+    border-bottom-right-radius:4px;max-width:88%}
+  .msg.assistant .bubble{background:var(--panel2);border:1px solid var(--border);
+    border-bottom-left-radius:4px}
+  .msg.system .bubble{background:#1e1a2e;border:1px solid #3a2f5a;
+    font-family:var(--mono);font-size:12.5px;max-height:300px;overflow-y:auto}
+  .msg.tool .bubble{background:#16241c;border:1px solid #24503a;font-family:var(--mono);font-size:12.5px}
+  .msg .bubble pre{background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:8px;
+    padding:11px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;margin:8px 0;
+    white-space:pre-wrap;word-break:break-word}
+  .msg .bubble code{background:#0d1117;color:#ffd7a0;padding:1px 5px;border-radius:4px;
+    font-family:var(--mono);font-size:12.5px}
+  .cursor{display:inline-block;width:7px;height:15px;background:var(--accent);
+    animation:blink 1s step-end infinite;vertical-align:text-bottom;margin-left:2px}
+  @keyframes blink{50%{opacity:0}}
+
+  /* 输入区 */
+  .input-bar{flex-shrink:0;padding:10px 12px;background:var(--panel);
+    border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end}
+  .input-bar textarea{flex:1;min-height:44px;max-height:140px;padding:11px 13px;
+    border-radius:11px;background:var(--bg);color:var(--text);border:1.5px solid var(--border);
+    resize:none;font-size:15px}
+  .input-bar textarea:focus{border-color:var(--accent)}
+  .send-btn{width:44px;height:44px;border-radius:11px;flex-shrink:0;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+    font-size:19px;display:flex;align-items:center;justify-content:center}
+  .send-btn:disabled{opacity:.4}
+
+  /* 卡片 / 列表 */
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:14px;margin-bottom:12px}
+  .card h3{margin:0 0 8px;font-size:15px}
+  .prompt-item{cursor:pointer}
+  .prompt-item:hover{border-color:var(--accent)}
+  .preview{font-family:var(--mono);font-size:12px;color:var(--dim);
+    max-height:76px;overflow:hidden;margin-top:6px;white-space:pre-wrap;word-break:break-all}
+  .meta{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--dim);margin-top:8px}
+  .tag{padding:2px 8px;border-radius:20px;background:var(--panel2);border:1px solid var(--border);
+    font-size:11px}
+  .tag.on{background:rgba(62,207,142,.15);border-color:var(--ok);color:var(--ok)}
+  .empty{text-align:center;color:var(--dim);padding:40px 20px;font-size:14px}
+
+  /* 弹窗 */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;
+    display:flex;align-items:center;justify-content:center;padding:16px}
+  .modal.hide{display:none}
+  .mbox{background:var(--panel);border:1px solid var(--border);border-radius:14px;
+    width:100%;max-width:560px;max-height:88vh;overflow-y:auto;padding:18px}
+  .mbox h2{margin:0 0 14px;font-size:17px}
+  .field{margin-bottom:13px}
+  .field label{display:block;font-size:12.5px;color:var(--dim);margin-bottom:5px;font-weight:600}
+  .field input,.field textarea,.field select{width:100%;padding:10px 12px;border-radius:9px;
+    background:var(--bg);color:var(--text);border:1.5px solid var(--border);font-size:14px}
+  .field textarea{font-family:var(--mono);font-size:12.5px;min-height:200px;resize:vertical}
+  .field input:focus,.field textarea:focus,.field select:focus{border-color:var(--accent)}
+  .row{display:flex;gap:9px;justify-content:flex-end;margin-top:16px}
+
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);
+    background:var(--panel2);border:1px solid var(--border);padding:11px 20px;border-radius:11px;
+    font-size:14px;z-index:300;transition:transform .28s;max-width:90vw}
+  .toast.show{transform:translateX(-50%) translateY(0)}
+  .toast.ok{border-color:var(--ok)} .toast.err{border-color:var(--err)}
+
+  @media(max-width:720px){
+    .sidebar{position:absolute;z-index:50;height:calc(100dvh - 53px);top:53px;left:0;
+      box-shadow:4px 0 20px rgba(0,0,0,.5)}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- 顶栏 -->
+  <div class="topbar">
+    <button class="tbtn" id="menuBtn" onclick="toggleSidebar()">☰</button>
+    <span class="dot" id="statusDot"></span>
+    <span class="logo">AI 帮写</span>
+    <span class="spacer"></span>
+    <button class="tbtn" onclick="switchView('prompts')">提示词</button>
+    <button class="tbtn" onclick="switchView('settings')">设置</button>
+  </div>
+
+  <div class="body">
+    <!-- 侧栏 -->
+    <div class="sidebar" id="sidebar">
+      <div class="sect">
+        <button class="tbtn pri" style="width:100%" onclick="newSession()">＋ 新建会话</button>
+      </div>
+      <div class="sect-title" style="padding:10px 12px 0">会话列表</div>
+      <div class="slist" id="sessionList">
+        <div class="empty">暂无会话</div>
+      </div>
+    </div>
+
+    <!-- 主区 -->
+    <div class="main">
+      <!-- 对话 -->
+      <div class="view" id="viewChat">
+        <div id="chatArea"><div class="empty">选择或新建一个会话开始对话</div></div>
+      </div>
+
+      <!-- 提示词 -->
+      <div class="view hide" id="viewPrompts">
+        <h2 style="margin:0 0 4px;font-size:18px">捕获的提示词</h2>
+        <p style="color:var(--dim);font-size:13px;margin:0 0 16px">
+          每一次发给模型的完整提示词都会被记录在这里，点击查看全文、编辑成模板。
+        </p>
+        <div id="promptList"></div>
+      </div>
+
+      <!-- 设置 -->
+      <div class="view hide" id="viewSettings">
+        <h2 style="margin:0 0 14px;font-size:18px">设置</h2>
+        <div class="card">
+          <h3>连接</h3>
+          <div class="field">
+            <label>网关地址</label>
+            <input id="cfgEndpoint" placeholder="https://ai-api.youyuanqi.dpdns.org">
+          </div>
+          <div class="field">
+            <label>访问密钥</label>
+            <input id="cfgKey" type="password" placeholder="PLATFORM_ACCESS_KEY">
+          </div>
+          <div class="field">
+            <label>插件 ID</label>
+            <input id="cfgPlugin" placeholder="ds_ai_agent">
+          </div>
+          <div class="field">
+            <label>模型名</label>
+            <input id="cfgModel" placeholder="（留空用 Prism 默认）">
+          </div>
+          <button class="tbtn pri" style="width:100%;padding:11px" onclick="saveSettings()">保存并测试连接</button>
+        </div>
+        <div class="card">
+          <h3>状态</h3>
+          <div id="statsBox" style="font-size:13px;color:var(--dim)">点击上方按钮检测</div>
+        </div>
+        <div class="card">
+          <h3>提示词模板</h3>
+          <div id="templateBox"></div>
+        </div>
+      </div>
+
+      <!-- 输入 -->
+      <div class="input-bar" id="inputBar">
+        <textarea id="input" rows="1" placeholder="描述你想要的功能…"></textarea>
+        <button class="send-btn" id="sendBtn" onclick="send()">➤</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 提示词弹窗 -->
+<div class="modal hide" id="modal">
+  <div class="mbox">
+    <h2 id="modalTitle">提示词全文</h2>
+    <div class="field">
+      <label>名称</label>
+      <input id="mName">
+    </div>
+    <div class="field">
+      <label>内容（可编辑）</label>
+      <textarea id="mContent"></textarea>
+    </div>
+    <div class="field">
+      <label>生效范围</label>
+      <select id="mScope">
+        <option value="plugin">仅该插件</option>
+        <option value="global">全局</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>
+        <input type="checkbox" id="mEnabled" style="width:auto;margin-right:6px">
+        启用（启用后会用这份内容覆盖 Prism 本地提示词）
+      </label>
+    </div>
+    <div class="row">
+      <button class="tbtn" onclick="closeModal()">取消</button>
+      <button class="tbtn pri" id="mSave" onclick="saveTemplate()">保存模板</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   状态
+============================================================ */
+var S = {
+  endpoint: localStorage.getItem('dsai_endpoint') || 'https://ai-api.youyuanqi.dpdns.org',
+  key:      localStorage.getItem('dsai_key') || '',
+  pluginId: localStorage.getItem('dsai_plugin') || 'ds_ai_agent',
+  model:    localStorage.getItem('dsai_model') || '',
+  session:  null,
+  messages: [],
+  sessions: [],
+  busy: false,
+  abort: null,
+  editingTemplateId: null,
+};
+
+function $(id){ return document.getElementById(id); }
+function toast(msg, kind){
+  var t = $('toast'); t.textContent = msg; t.className = 'toast show ' + (kind||'');
+  clearTimeout(t._t); t._t = setTimeout(function(){ t.className = 'toast'; }, 2600);
+}
+function esc(s){ return String(s==null?'':s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* 简易 Markdown 渲染（代码块 + 行内代码 + 换行） */
+function md(text){
+  var h = esc(text);
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code){
+    return '<pre>' + code.replace(/\n$/,'') + '</pre>';
+  });
+  h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  return h;
+}
+
+/* ============================================================
+   API
+============================================================ */
+async function api(path, opts){
+  opts = opts || {};
+  var headers = { 'Content-Type': 'application/json' };
+  if (S.key) headers['Authorization'] = 'Bearer ' + S.key;
+  var res = await fetch(S.endpoint + path, {
+    method: opts.method || 'GET',
+    headers: headers,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  var txt = await res.text();
+  var data;
+  try { data = JSON.parse(txt); } catch(e){ data = { raw: txt }; }
+  if (!res.ok || (data && data.ok === false)) {
+    throw new Error((data && (data.error || data.message)) || ('HTTP ' + res.status));
+  }
+  return data && data.data !== undefined ? data.data : data;
+}
+
+/* ============================================================
+   视图切换
+============================================================ */
+function switchView(name){
+  ['viewChat','viewPrompts','viewSettings'].forEach(function(id){
+    $(id).classList.toggle('hide', id !== 'view' + name.charAt(0).toUpperCase() + name.slice(1));
+  });
+  $('inputBar').style.display = name === 'chat' ? 'flex' : 'none';
+  if (name === 'prompts') loadPrompts();
+  if (name === 'settings') loadTemplates();
+}
+function toggleSidebar(){ $('sidebar').classList.toggle('hide'); }
+
+/* ============================================================
+   会话
+============================================================ */
+async function loadSessions(){
+  try {
+    var list = await api('/api/v1/ai-assist/sessions?limit=60');
+    S.sessions = list || [];
+    renderSessions();
+  } catch(e){
+    $('sessionList').innerHTML =
+      '<div class="empty">加载失败<br><span style="font-size:12px">' + esc(e.message) + '</span></div>';
+  }
+}
+function renderSessions(){
+  var el = $('sessionList');
+  if (!S.sessions.length) { el.innerHTML = '<div class="empty">暂无会话</div>'; return; }
+  el.innerHTML = S.sessions.map(function(s){
+    var act = S.session === s.id ? ' act' : '';
+    var t = new Date(s.updated_at).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    return '<div class="sitem' + act + '" onclick="openSession(\'' +
+      esc(s.id).replace(/'/g,"\\'") + '\')">' +
+      '<div class="t">' + esc(s.title || s.id) + '</div>' +
+      '<div class="s">' + (s.message_count||0) + ' 条 · ' + t + '</div></div>';
+  }).join('');
+}
+async function openSession(id){
+  S.session = id;
+  renderSessions();
+  $('chatArea').innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    var msgs = await api('/api/v1/ai-assist/sessions/' + encodeURIComponent(id) + '/messages');
+    S.messages = msgs || [];
+    renderChat();
+  } catch(e){
+    $('chatArea').innerHTML = '<div class="empty">加载失败：' + esc(e.message) + '</div>';
+  }
+  if (window.innerWidth <= 720) $('sidebar').classList.add('hide');
+}
+function newSession(){
+  S.session = 'sess_' + Date.now();
+  S.messages = [];
+  renderChat();
+  if (window.innerWidth <= 720) $('sidebar').classList.add('hide');
+  $('input').focus();
+}
+function renderChat(){
+  var el = $('chatArea');
+  if (!S.messages.length){
+    el.innerHTML = '<div class="empty">开始对话吧</div>';
+    return;
+  }
+  el.innerHTML = S.messages.map(function(m){ return msgHtml(m); }).join('');
+  scrollBottom();
+}
+function msgHtml(m){
+  var role = m.role || 'assistant';
+  var cls = role === 'user' ? 'user' : (role === 'system' ? 'system' : 'assistant');
+  var label = role === 'user' ? '你' :
+              role === 'system' ? '系统提示词' :
+              role === 'tool_result' ? '工具结果' : 'AI';
+  var body = md(m.content || '');
+  if (m.is_system_prompt) label += ' · 已捕获';
+  return '<div class="msg ' + cls + '"><div class="role">' + label + '</div>' +
+         '<div class="bubble">' + body + '</div></div>';
+}
+function scrollBottom(){
+  var v = $('viewChat'); if (v) v.scrollTop = v.scrollHeight;
+}
+
+/* ============================================================
+   ★ 发送 + SSE 流式接收
+============================================================ */
+async function send(){
+  var inp = $('input');
+  var text = (inp.value || '').trim();
+  if (!text || S.busy) return;
+  if (!S.key) { toast('请先在设置里填访问密钥', 'err'); switchView('settings'); return; }
+  if (!S.session) S.session = 'sess_' + Date.now();
+
+  S.busy = true;
+  $('sendBtn').disabled = true;
+  inp.value = ''; autoGrow(inp);
+
+  // 本地先渲染用户消息 + 空的 AI 气泡
+  S.messages.push({ role:'user', content:text });
+  var asst = { role:'assistant', content:'' };
+  S.messages.push(asst);
+  renderChat();
+
+  var bubbles = $('chatArea').querySelectorAll('.msg.assistant .bubble');
+  var bubble = bubbles[bubbles.length - 1];
+  if (bubble) bubble.innerHTML = '<span class="cursor"></span>';
+
+  var acc = '';
+  var ctrl = new AbortController();
+  S.abort = ctrl;
+  var headers = { 'Content-Type':'application/json', 'Authorization':'Bearer ' + S.key };
+
+  try {
+    var res = await fetch(S.endpoint + '/api/v1/ai-assist/chat', {
+      method: 'POST', headers: headers, signal: ctrl.signal,
+      body: JSON.stringify({
+        model_name: S.model || undefined,
+        plugin_id: S.pluginId,
+        session_name: S.session,
+        messages: S.messages.slice(0, -1),   // 不含刚推入的空 asst
+      }),
+    });
+    if (!res.ok) {
+      var t = await res.text();
+      throw new Error(t || ('HTTP ' + res.status));
+    }
+
+    var reader = res.body.getReader(), dec = new TextDecoder(), buf = '';
+    for (;;) {
+      var r = await reader.read();
+      if (r.done) break;
+      buf += dec.decode(r.value, { stream:true });
+      var idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        var block = buf.slice(0, idx); buf = buf.slice(idx + 2);
+        var chunk = handleSSE(block);
+        if (chunk) {
+          acc += chunk;
+          if (bubble) bubble.innerHTML = md(acc) + '<span class="cursor"></span>';
+          scrollBottom();
+        }
+      }
+    }
+  } catch(e){
+    if (e.name !== 'AbortError') toast('请求失败：' + e.message, 'err');
+  } finally {
+    asst.content = acc;
+    if (!acc) S.messages.pop();
+    renderChat();
+    S.busy = false; S.abort = null;
+    $('sendBtn').disabled = false;
+    loadSessions();
+  }
+}
+/* 解析单个 SSE 块，返回本次新增文本（或 null） */
+function handleSSE(block){
+  var ev = '', data = '';
+  block.split('\n').forEach(function(l){
+    if (l.indexOf('event:') === 0) ev = l.slice(6).trim();
+    else if (l.indexOf('data:') === 0) data = l.slice(5).trim();
+  });
+  if (!data) return null;
+  var d; try { d = JSON.parse(data); } catch(e){ return null; }
+  if (ev === 'ai_chunk' && d.text) return d.text;
+  if (ev === 'ai_error') { toast(d.error || 'AI 出错', 'err'); return null; }
+  if (ev === 'ai_tool_start' && d.name) { toast('执行工具：' + d.name); return null; }
+  return null;
+}
+function autoGrow(el){
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+}
+
+/* ============================================================
+   ★ 提示词
+============================================================ */
+async function loadPrompts(){
+  var el = $('promptList');
+  el.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    var list = await api('/api/v1/ai-assist/prompts');
+    if (!list || !list.length){
+      el.innerHTML = '<div class="empty">还没有捕获到提示词<br>' +
+        '<span style="font-size:12px">去对话页面发一条消息试试</span></div>';
+      return;
+    }
+    el.innerHTML = list.map(function(p){
+      var t = new Date(p.last_seen).toLocaleString('zh-CN');
+      return '<div class="card prompt-item" onclick="openPrompt(' + p.id + ')">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<span class="tag">#' + p.id + '</span>' +
+          '<span class="tag">' + (p.char_count||0) + ' 字符</span>' +
+          '<span class="tag">命中 ' + (p.hit_count||1) + ' 次</span>' +
+          (p.plugin_id ? '<span class="tag">' + esc(p.plugin_id) + '</span>' : '') +
+        '</div>' +
+        '<div class="preview">' + esc(p.preview || '') + '…</div>' +
+        '<div class="meta"><span>' + t + '</span></div>' +
+      '</div>';
+    }).join('');
+  } catch(e){
+    el.innerHTML = '<div class="empty">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+async function openPrompt(id){
+  try {
+    var p = await api('/api/v1/ai-assist/prompts/' + id);
+    $('modalTitle').textContent = '提示词全文 #' + id;
+    $('mName').value = '来自抓取 #' + id;
+    $('mContent').value = p.content || '';
+    $('mScope').value = 'plugin';
+    $('mEnabled').checked = false;
+    S.editingTemplateId = null;
+    $('modal').classList.remove('hide');
+  } catch(e){ toast(e.message, 'err'); }
+}
+async function loadTemplates(){
+  var el = $('templateBox');
+  try {
+    var list = await api('/api/v1/ai-assist/templates');
+    if (!list || !list.length){
+      el.innerHTML = '<div style="color:var(--dim);font-size:13px">还没有模板。' +
+        '去「提示词」页点开一条抓取记录即可创建。</div>';
+      return;
+    }
+    el.innerHTML = list.map(function(t){
+      return '<div class="card" style="margin-bottom:8px">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<strong style="font-size:14px">' + esc(t.name) + '</strong>' +
+          '<span class="tag ' + (t.enabled ? 'on' : '') + '">' +
+            (t.enabled ? '已启用' : '未启用') + '</span>' +
+          '<span class="tag">' + esc(t.scope) + '</span>' +
+          '<span class="spacer" style="flex:1"></span>' +
+          '<button class="tbtn" onclick="editTemplate(' + t.id + ')">编辑</button>' +
+          '<button class="tbtn" onclick="delTemplate(' + t.id + ')">删除</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e){
+    el.innerHTML = '<div style="color:var(--err);font-size:13px">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+async function editTemplate(id){
+  try {
+    var list = await api('/api/v1/ai-assist/templates');
+    var t = (list || []).filter(function(x){ return x.id === id; })[0];
+    if (!t) return toast('未找到', 'err');
+    $('modalTitle').textContent = '编辑模板';
+    $('mName').value = t.name || '';
+    $('mContent').value = t.content || '';
+    $('mScope').value = t.scope || 'plugin';
+    $('mEnabled').checked = !!t.enabled;
+    S.editingTemplateId = id;
+    $('modal').classList.remove('hide');
+  } catch(e){ toast(e.message, 'err'); }
+}
+async function saveTemplate(){
+  var body = {
+    name: $('mName').value.trim(),
+    content: $('mContent').value,
+    scope: $('mScope').value,
+    plugin_id: S.pluginId,
+    enabled: $('mEnabled').checked,
+    priority: 10,
+  };
+  if (S.editingTemplateId) body.id = S.editingTemplateId;
+  if (!body.name || !body.content) return toast('名称和内容不能为空', 'err');
+  try {
+    await api('/api/v1/ai-assist/templates', { method:'POST', body: body });
+    toast('已保存', 'ok');
+    closeModal();
+    loadTemplates();
+  } catch(e){ toast('保存失败：' + e.message, 'err'); }
+}
+async function delTemplate(id){
+  if (!confirm('确定删除这个模板？')) return;
+  try {
+    await api('/api/v1/ai-assist/templates/' + id, { method:'DELETE' });
+    toast('已删除', 'ok'); loadTemplates();
+  } catch(e){ toast(e.message, 'err'); }
+}
+function closeModal(){ $('modal').classList.add('hide'); }
+
+/* ============================================================
+   设置
+============================================================ */
+function saveSettings(){
+  S.endpoint = $('cfgEndpoint').value.trim().replace(/\/$/, '');
+  S.key      = $('cfgKey').value.trim();
+  S.pluginId = $('cfgPlugin').value.trim() || 'ds_ai_agent';
+  S.model    = $('cfgModel').value.trim();
+  localStorage.setItem('dsai_endpoint', S.endpoint);
+  localStorage.setItem('dsai_key', S.key);
+  localStorage.setItem('dsai_plugin', S.pluginId);
+  localStorage.setItem('dsai_model', S.model);
+  checkHealth();
+  loadSessions();
+}
+function loadSettings(){
+  $('cfgEndpoint').value = S.endpoint;
+  $('cfgKey').value = S.key;
+  $('cfgPlugin').value = S.pluginId;
+  $('cfgModel').value = S.model;
+}
+async function checkHealth(){
+  var box = $('statsBox');
+  box.textContent = '检测中…';
+  try {
+    var h = await fetch(S.endpoint + '/health').then(function(r){ return r.json(); });
+    var d = h.data || {};
+    var on = d.prism_online;
+    $('statusDot').className = 'dot ' + (on ? 'on' : 'off');
+    var html = '<div>网关：<b style="color:var(--ok)">在线</b></div>' +
+      '<div>Prism：<b style="color:' + (on?'var(--ok)':'var(--err)') + '">' +
+        (on ? '在线' : '离线') + '</b>' + (d.prism_error ? ' <span style="font-size:11px">(' + esc(d.prism_error) + ')</span>' : '') + '</div>' +
+      '<div style="margin-top:6px">隧道：' + esc(d.prism_tunnel_url || '') + '</div>';
+    try {
+      var st = await api('/api/v1/ai-assist/stats');
+      html += '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0">' +
+        '<div>会话：' + st.sessions + ' · 消息：' + st.messages + ' · 提示词：' + st.prompts + '</div>' +
+        '<div>今日：' + st.today_tokens + ' tokens / ' + st.today_requests + ' 次请求</div>';
+    } catch(e){ /* 密钥可能没填 */ }
+    box.innerHTML = html;
+  } catch(e){
+    $('statusDot').className = 'dot off';
+    box.innerHTML = '<span style="color:var(--err)">连接失败：' + esc(e.message) + '</span>';
+  }
+}
+
+/* ============================================================
+   初始化
+============================================================ */
+(function init(){
+  loadSettings();
+  checkHealth();
+  if (S.key) loadSessions();
+  else $('sessionList').innerHTML =
+    '<div class="empty">请先在「设置」里填入访问密钥</div>';
+
+  var inp = $('input');
+  inp.addEventListener('input', function(){ autoGrow(inp); });
+  inp.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+  });
+  // 移动端默认收起侧栏
+  if (window.innerWidth <= 720) $('sidebar').classList.add('hide');
+})();
+</script>
+</body>
+</html>

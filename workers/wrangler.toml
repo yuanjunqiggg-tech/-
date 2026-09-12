@@ -1,0 +1,44 @@
+# ============================================================
+# Ds Platform · AI 帮写 外部控制网关
+# Cloudflare Workers 配置
+#
+# 部署：wrangler deploy
+# 子域名：api.youyuanqi.dpdns.org
+# ============================================================
+
+name = "ds-platform-ai-assist"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# ------------------------------------------------------------
+# D1 数据库（复用现有 ds-platform 库）
+# ------------------------------------------------------------
+[[d1_databases]]
+binding = "DB"
+database_name = "ds-platform"
+database_id = "9a59b3cb-787c-442c-aa74-86adc64083ff"
+
+# ------------------------------------------------------------
+# Cloudflare 免费 AI（兜底模型池）
+# ------------------------------------------------------------
+[ai]
+binding = "AI"
+
+# ------------------------------------------------------------
+# 环境变量
+# ------------------------------------------------------------
+[vars]
+API_PREFIX = "/api/v1"
+# Prism 本地服务地址（通过 Cloudflare Tunnel 暴露）
+# 部署后需在 Cloudflare Dashboard 或 wrangler secret 中覆盖为真实隧道地址
+PRISM_TUNNEL_URL = "https://tunnel.youyuanqi.dpdns.org"
+# 平台访问密钥（客户端鉴权用，部署后请用 secret 覆盖）
+PLATFORM_ACCESS_KEY = "change-me-in-production"
+
+# 自定义域名
+# 注意：如果 api.youyuanqi.dpdns.org 已被现有 worker 占用，
+# 请改用 ai-api.youyuanqi.dpdns.org 或复用现有 worker 增加路由
+routes = [
+  { pattern = "ai-api.youyuanqi.dpdns.org", custom_domain = true }
+]

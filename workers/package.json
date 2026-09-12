@@ -1,0 +1,19 @@
+{
+  "name": "ds-platform-ai-assist",
+  "version": "1.0.0",
+  "description": "Ds Platform · AI 帮写外部控制网关（Cloudflare Workers）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute ds-platform --file=./sql/schema.sql",
+    "db:init:remote": "wrangler d1 execute ds-platform --remote --file=./sql/schema.sql",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "typescript": "^5.6.2",
+    "wrangler": "^3.78.0"
+  }
+}
