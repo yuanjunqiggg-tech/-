@@ -522,6 +522,226 @@ async function stats(env: Env): Promise<Response> {
   });
 }
 
+// ------------------------------------------------------------
+// ★ MCP 中转（手机 Codex / 异地电脑接入）
+//
+// 原理：Prism 的原生工具在它进程内执行，没有独立 HTTP 端点。
+//      本网关提供 /api/v1/mcp/tool，接收 {tool_name, arguments}，
+//      改写成一次 /api/ai/chat 请求驱动 Prism 的 AI 发起该工具调用，
+//      再从 SSE 流里截取 ai_tool_done 的真实结果返回。
+//      MCP 客户端（Codex）只需对这一个端点发 POST 即可。
+// ------------------------------------------------------------
+
+/** 解析 SSE 文本，抽取工具执行结果 */
+function parseToolFromSSE(sse: string): {
+  found: boolean;
+  tool?: string;
+  result?: unknown;
+  is_error?: boolean;
+  executed?: boolean;
+  ai_text?: string;
+  error?: string;
+} {
+  const blocks = sse.split('\n\n');
+  let lastTool: any = null;
+  let aiText = '';
+  let aiError = '';
+
+  for (const block of blocks) {
+    let ev = '';
+    let payload: any = null;
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event:')) ev = line.slice(6).trim();
+      else if (line.startsWith('data:')) {
+        try {
+          payload = JSON.parse(line.slice(5).trim());
+        } catch {
+          payload = { raw: line.slice(5).trim() };
+        }
+      }
+    }
+    if (!ev) continue;
+    if (ev === 'ai_tool_done') lastTool = payload;
+    else if (ev === 'ai_chunk' && payload?.text) aiText += payload.text;
+    else if (ev === 'ai_error') aiError = payload?.error || 'AI 报错';
+  }
+
+  if (aiError) return { found: false, error: aiError, ai_text: aiText };
+  if (!lastTool) return { found: false, ai_text: aiText };
+
+  let parsed: unknown = lastTool.result;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      /* 保留原字符串 */
+    }
+  }
+  return {
+    found: true,
+    tool: lastTool.name,
+    result: parsed,
+    is_error: !!lastTool.is_error,
+    executed: lastTool.evidence === 'executed',
+    ai_text: aiText.slice(0, 800),
+  };
+}
+
+/** 驱动 Prism 的 AI 调用一个工具，返回真实执行结果 */
+async function driveTool(
+  env: Env,
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+  sessionName?: string,
+): Promise<Response> {
+  const body = {
+    model_name: 'prism自动',
+    plugin_id: '',
+    mode: '',
+    session_name: sessionName || `mcp-${Date.now()}`,
+    messages: [
+      {
+        role: 'system',
+        content:
+          '你是工具执行器。用户会指定一个工具名和参数，' +
+          '你必须立即发起该工具的 tool_calls，不要解释、不要闲聊、不要修改参数。' +
+          '只调用这一个工具，然后简短说明结果。',
+      },
+      {
+        role: 'user',
+        content:
+          `请立即调用工具 \`${toolName}\`，参数如下（JSON）：\n` +
+          `${JSON.stringify(toolArgs, null, 2)}\n\n只调用这一个工具。`,
+      },
+    ],
+  };
+
+  const target = `${env.PRISM_TUNNEL_URL}/api/ai/chat`;
+  let upstream: Response;
+  try {
+    upstream = await fetch(target, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e: any) {
+    return fail(`无法连接 Prism 隧道：${e?.message || e}`, 502);
+  }
+
+  if (!upstream.ok) {
+    return fail(`Prism 返回 HTTP ${upstream.status}`, 502);
+  }
+
+  // 这里必须读完整个 SSE 才能拿到工具结果（MCP 是请求-响应模型）
+  const sse = await upstream.text();
+  const r = parseToolFromSSE(sse);
+
+  if (!r.found) {
+    return json({
+      ok: false,
+      error: r.error || `AI 未调用工具 ${toolName}（可能机器人未连接）`,
+      ai_comment: r.ai_text,
+    });
+  }
+
+  return json({
+    ok: !r.is_error,
+    tool: r.tool,
+    executed: r.executed,
+    result: r.result,
+    ai_comment: r.ai_text,
+  });
+}
+
+/** 直连 Prism 的一个 REST 端点（状态/模型/插件等） */
+async function prismPassthrough(
+  env: Env,
+  subPath: string,
+  method = 'GET',
+  body?: unknown,
+): Promise<Response> {
+  const target = `${env.PRISM_TUNNEL_URL}${subPath}`;
+  try {
+    const r = await fetch(target, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await r.text();
+    return new Response(text, {
+      status: r.status,
+      headers: {
+        'Content-Type': r.headers.get('Content-Type') || 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
+  } catch (e: any) {
+    return fail(`Prism 不可达：${e?.message || e}`, 502);
+  }
+}
+
+/** MCP 工具目录（供客户端发现） */
+function mcpToolCatalog(): Response {
+  return ok({
+    endpoint: 'POST /api/v1/mcp/tool',
+    usage: '{"tool_name":"list_packets","arguments":{}}',
+    local: [
+      { name: 'status', desc: '机器人状态' },
+      { name: 'models', desc: '模型列表' },
+      { name: 'skills', desc: '技能库列表' },
+      { name: 'plugins', desc: '插件列表' },
+    ],
+    packet: [
+      { name: 'packet_history', desc: '历史抓包回看' },
+      { name: 'packet_subscribe', desc: '实时抓包订阅（长轮询）' },
+      { name: 'packet_send', desc: '发包' },
+    ],
+    native: '任意 Prism 原生工具名（list_packets / query_packets / send_packet / game_call / write_plugin_file ...）',
+  });
+}
+
+/** 实时抓包订阅（网关侧长轮询，适合手机端） */
+async function packetSubscribe(req: Request, env: Env): Promise<Response> {
+  let b: any = {};
+  try {
+    b = await req.json();
+  } catch {
+    /* 允许空 body */
+  }
+  const duration = Math.min(Math.max(parseInt(b.duration ?? '10', 10) || 10, 1), 60);
+  const ptype = (b.packet_type || '').toString();
+  const collected: unknown[] = [];
+  const deadline = Date.now() + duration * 1000;
+  let rounds = 0;
+
+  while (Date.now() < deadline && rounds < 30) {
+    rounds++;
+    const wargs: Record<string, unknown> = { seconds: 3 };
+    if (ptype) wargs.packet_type = ptype;
+
+    const resp = await driveTool(env, 'wait_packet', wargs);
+    const data: any = await resp.clone().json().catch(() => null);
+    if (data?.ok && data.result) {
+      collected.push(data.result);
+    } else if (collected.length === 0 && data && !data.ok) {
+      return json({
+        ok: false,
+        error: data.error || '抓包失败',
+        hint: '机器人可能未连接服务器，先调 status 确认 connected',
+      });
+    }
+  }
+
+  return ok({
+    action: 'subscribe',
+    duration,
+    packet_type: ptype || '(全部)',
+    rounds,
+    captured: collected.length,
+    packets: collected.slice(0, 100),
+  });
+}
+
 /** 健康检查 */
 async function health(req: Request, env: Env): Promise<Response> {
   const targetUrl = `${env.PRISM_TUNNEL_URL}/api/config`;
@@ -614,6 +834,54 @@ export default {
       // 统计
       if (path === '/api/v1/ai-assist/stats' && req.method === 'GET') {
         return stats(env);
+      }
+
+      // --------------------------------------------------------
+      // ★ MCP 中转路由（Codex / 手机端接入）
+      // --------------------------------------------------------
+      if (path === '/api/v1/mcp/tools' && req.method === 'GET') {
+        return mcpToolCatalog();
+      }
+
+      // 通用工具调用入口：驱动 Prism AI 执行任意工具
+      if (path === '/api/v1/mcp/tool' && req.method === 'POST') {
+        let b: any = {};
+        try {
+          b = await req.json();
+        } catch {
+          return fail('请求体必须是 JSON');
+        }
+        const tn = b.tool_name || b.name;
+        if (!tn) return fail('缺少 tool_name');
+
+        // 本地直通类
+        if (tn === 'status') return prismPassthrough(env, '/api/bot/status');
+        if (tn === 'models') return prismPassthrough(env, '/api/ai/models');
+        if (tn === 'skills') return prismPassthrough(env, '/api/ai/skills');
+        if (tn === 'plugins') return prismPassthrough(env, '/api/plugin/list');
+        if (tn === 'packet_history') {
+          const act = b.arguments?.action || 'list';
+          if (act === 'list') return driveTool(env, 'list_packets', {});
+          if (act === 'stats') return driveTool(env, 'packet_stats', {});
+          return driveTool(env, 'query_packets', {
+            limit: b.arguments?.limit ?? 50,
+            ...(b.arguments?.packet_type ? { type: b.arguments.packet_type } : {}),
+          });
+        }
+        if (tn === 'packet_send') {
+          return driveTool(env, 'send_packet', {
+            type: b.arguments?.packet_type,
+            data: b.arguments?.data || {},
+          });
+        }
+
+        // 其余一律视为 Prism 原生工具名
+        return driveTool(env, tn, b.arguments || {}, b.session_name);
+      }
+
+      // 实时抓包订阅
+      if (path === '/api/v1/mcp/packet/subscribe' && req.method === 'POST') {
+        return packetSubscribe(req, env);
       }
 
       return fail(`未找到路由: ${path}`, 404);

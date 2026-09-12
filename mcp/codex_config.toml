@@ -1,0 +1,39 @@
+# ============================================================
+# Codex MCP 接入配置
+#
+# 把下面内容追加到 ~/.codex/config.toml
+# Windows 路径：C:/Users/16650/.codex/config.toml
+#
+# 两种模式任选其一（或都配上，用不同的 server 名）
+# ============================================================
+
+# ------------------------------------------------------------
+# 方式 A：本地直连（Codex 与 Prism 同一台电脑）
+#   延迟最低，无需隧道和网关
+# ------------------------------------------------------------
+[mcp_servers.prism]
+command = "python"
+args = ["C://Users//16650//WorkBuddy AI//2026-09-13-00-20-42//ds-platform-ai-assist//mcp//prism_mcp.py"]
+startup_timeout_sec = 30
+tool_timeout_sec = 180
+
+[mcp_servers.prism.env]
+PRISM_URL = "http://127.0.0.1:8080"
+PRISM_MODEL = "prism自动"
+PRISM_TIMEOUT = "120"
+
+
+# ------------------------------------------------------------
+# 方式 B：云端中转（手机 / 异地电脑）
+#   需要先部署 Workers 网关 + Cloudflare Tunnel
+# ------------------------------------------------------------
+[mcp_servers.prism-cloud]
+command = "python"
+args = ["C://Users//16650//WorkBuddy AI//2026-09-13-00-20-42//ds-platform-ai-assist//mcp//prism_http_mcp.py"]
+startup_timeout_sec = 30
+tool_timeout_sec = 240
+
+[mcp_servers.prism-cloud.env]
+PRISM_GATEWAY = "https://ai-api.youyuanqi.dpdns.org"
+PRISM_API_KEY = "<把 PLATFORM_ACCESS_KEY 填这里>"
+PRISM_TIMEOUT = "180"

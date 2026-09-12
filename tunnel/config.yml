@@ -27,12 +27,12 @@ originRequest:
 ingress:
   # ------------------------------------------------------------
   # ★ 新增：Prism 工具箱 Web 服务
-  #    把 <PRISM_PORT> 替换成 Prism 启动时显示的端口号
+  #    把 <PRISM_PORT> 已确认为 8080
   #    用途：AI 帮写的外部入口
   # ------------------------------------------------------------
   - hostname: prism.youyuanqi.dpdns.org
     path: /api/ai/*
-    service: http://localhost:<PRISM_PORT>
+    service: http://localhost:8080
     originRequest:
       connectTimeout: 30s
       noTLSVerify: true
@@ -42,13 +42,13 @@ ingress:
 
   - hostname: prism.youyuanqi.dpdns.org
     path: /api/plugin/*
-    service: http://localhost:<PRISM_PORT>
+    service: http://localhost:8080
     originRequest:
       noTLSVerify: true
       httpHostHeader: localhost
 
   - hostname: prism.youyuanqi.dpdns.org
-    service: http://localhost:<PRISM_PORT>
+    service: http://localhost:8080
     originRequest:
       noTLSVerify: true
       httpHostHeader: localhost
