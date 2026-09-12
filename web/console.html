@@ -735,6 +735,10 @@ function handleEvent(e){
       addMsg('e', p.error || p.message || '设备侧报错');
       streaming=false; document.getElementById('sendBtn').disabled=false;
       break;
+    case 'ai_round_done':
+      // AI 这一轮回复结束（不等于整条指令结束），仅收拢气泡
+      aiBubble = null;
+      break;
     case 'done':
       aiBubble = null;
       // 指令完成

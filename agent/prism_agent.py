@@ -39,19 +39,55 @@ import socket
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # ------------------------------------------------------------
 # 配置
 # ------------------------------------------------------------
-GATEWAY = os.environ.get("PRISM_GATEWAY", "https://ai-api.youyuanqi.dpdns.org").rstrip("/")
+def _normalize_gateway(u: str) -> str:
+    """把网关地址归一化到「域名根」，因为 cloud() 会自己拼 /api/v1/...
+
+    用户经常会把控制台里看到的完整地址（含 /api/v1）直接粘进来，
+    这里统一容错，避免出现 /api/v1/api/v1/device/register 这种双拼。
+    """
+    u = (u or "").strip().rstrip("/")
+    # 去掉末尾的 /api/v1、/api、/v1 等常见后缀
+    u = re.sub(r"/api/v1/?$", "", u)
+    u = re.sub(r"/api/?$", "", u)
+    return u.rstrip("/")
+
+
+GATEWAY = _normalize_gateway(os.environ.get("PRISM_GATEWAY", "https://ai-api.youyuanqi.dpdns.org"))
 PRISM_URL = os.environ.get("PRISM_URL", "http://127.0.0.1:8080").rstrip("/")
+# Prism 地址也可能被误填带后缀，做同样处理
+PRISM_URL = re.sub(r"/(api|api/v1)$", "", PRISM_URL)
 STATE_PATH = os.environ.get("AGENT_STATE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_state.json"))
 
-# 本机 Prism 走直连，云端网关走系统代理，所以要分开两个 opener
-os.environ["NO_PROXY"] = "localhost,127.0.0.1,::1"
+# 本机 Prism 走直连；云端网关默认也直连（避免系统代理劫持 127.0.0.1 造成 502）
+os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
+os.environ.setdefault("no_proxy", "localhost,127.0.0.1,::1")
+
+# ★ 关键：explicitly 绕过代理，不要依赖 NO_PROXY 环境变量。
+#   实测在 Windows + 系统代理（如 7897 端口）环境下，urllib 默认 opener
+#   仍会把 127.0.0.1 / 局域网请求丢给代理，导致 "Tunnel connection failed: 502"。
 _local_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-_cloud_opener = urllib.request.build_opener()
+
+# ★ 云端 opener：默认完全绕过系统代理。
+#
+#   踩坑记录（Windows + 系统代理 127.0.0.1:61543）：
+#     - 用 build_opener() 会读取系统代理，把 127.0.0.1 请求丢给代理，
+#       报 "Tunnel connection failed: 502 Bad Gateway"；
+#     - 子类化 ProxyHandler 覆写 proxy_open 返回 None 也不行，
+#       返回 None 的语义是「本 handler 不处理」，urllib 仍会走代理；
+#     - Windows 的 proxy_bypass 对 127.0.0.1 默认返回 False。
+#
+#   结论：直连最稳。若你的网络确实需要代理才能访问外网，
+#   显式设置环境变量 PRISM_USE_SYSTEM_PROXY=1 即可恢复系统代理。
+if os.environ.get("PRISM_USE_SYSTEM_PROXY") == "1":
+    _cloud_opener = urllib.request.build_opener()
+else:
+    _cloud_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 HEARTBEAT_SEC = 20      # 心跳间隔
 POLL_WAIT = 25          # 每次长轮询挂起秒数
@@ -95,8 +131,10 @@ def http(url: str, method="GET", body=None, headers=None, opener=None, timeout=6
         return {"raw": raw}
 
 
-def cloud(path: str, method="GET", body=None, timeout=60):
-    return http(f"{GATEWAY}{path}", method, body, timeout=timeout)
+def cloud(path: str, method="GET", body=None, headers=None, timeout=60):
+    """调云端网关。path 需自带 /api/v1 前缀。"""
+    return http(f"{GATEWAY}{path}", method, body, headers=headers,
+                opener=_cloud_opener, timeout=timeout)
 
 
 def prism(path: str, method="GET", body=None, timeout=PRISM_TIMEOUT):
@@ -240,11 +278,28 @@ def report(state: dict, cmd_id: str, events: list, done=False, result=None, erro
         log(f"上报失败：{e}")
 
 
-def chat_stream(payload: dict, on_event):
+def chat_stream(payload: dict, on_event, retry: int = 2):
     """
     调 Prism /api/ai/chat，逐块解析 SSE 并回调。
     这是流式反馈的关键——不能等整个响应读完再返回。
+
+    ★ 重试：Prism 在并发新建会话时偶尔会返回空流（无任何事件）。
+      这里对「空响应」自动重试，避免工具调用静默失败。
     """
+    last = {"text": "", "tools": []}
+    for attempt in range(retry + 1):
+        r = _chat_stream_once(payload, on_event)
+        last = r
+        # 有工具结果或文本，视为成功
+        if r["tools"] or r["text"].strip():
+            return r
+        if attempt < retry:
+            log(f"  ⚠ Prism 返回空响应，重试 {attempt + 1}/{retry}")
+            time.sleep(1.0 + attempt)
+    return last
+
+
+def _chat_stream_once(payload: dict, on_event):
     body = {
         "model_name": payload.get("model_name", "prism自动"),
         "plugin_id": payload.get("plugin_id", ""),
@@ -259,42 +314,61 @@ def chat_stream(payload: dict, on_event):
         method="POST",
     )
     text_all, tools_done = [], []
+
+    def handle_block(block: str):
+        """解析一个 SSE 事件块并回调"""
+        ev, data = None, None
+        for line in block.split("\n"):
+            line = line.rstrip("\r")
+            if line.startswith("event:"):
+                ev = line[6:].strip()
+            elif line.startswith("data:"):
+                payload_str = line[5:].strip()
+                try:
+                    data = json.loads(payload_str)
+                except Exception:
+                    data = {"raw": payload_str}
+        if not ev:
+            return
+
+        # 映射成云端事件类型
+        if ev == "ai_chunk" and (data or {}).get("text"):
+            text_all.append(data["text"])
+            on_event({"type": "chunk", "payload": {"text": data["text"]}})
+        elif ev == "ai_thinking" and (data or {}).get("text"):
+            on_event({"type": "thinking", "payload": {"text": data["text"]}})
+        elif ev == "ai_tool_start":
+            on_event({"type": "tool_start", "payload": data})
+        elif ev == "ai_tool_done":
+            tools_done.append(data)
+            on_event({"type": "tool_done", "payload": data})
+        elif ev == "ai_usage":
+            on_event({"type": "usage", "payload": data})
+        elif ev == "ai_error":
+            on_event({"type": "error", "payload": data})
+        elif ev == "ai_done":
+            # ★ 注意：这是「AI 这一轮回复结束」，不是「整条指令执行完毕」。
+            #   用 ai_round_done 与指令级的 done 区分开，避免 Worker 误收尾。
+            on_event({"type": "ai_round_done", "payload": data})
+
     with _local_opener.open(req, timeout=PRISM_TIMEOUT) as resp:
         buf = ""
-        for chunk in iter(lambda: resp.read(256), b""):
+        # ★ 用较大分块读，减少切分次数；并且在流结束后处理残余 buf，
+        #   避免最后一个事件（常见于 ai_tool_done / ai_done）因缺少结尾空行被丢弃
+        while True:
+            chunk = resp.read(4096)
+            if not chunk:
+                break
             buf += chunk.decode("utf-8", "replace")
             while "\n\n" in buf:
                 idx = buf.index("\n\n")
                 block, buf = buf[:idx], buf[idx + 2:]
-                ev, data = None, None
-                for line in block.split("\n"):
-                    if line.startswith("event:"):
-                        ev = line[6:].strip()
-                    elif line.startswith("data:"):
-                        try:
-                            data = json.loads(line[5:].strip())
-                        except Exception:
-                            data = {"raw": line[5:].strip()}
-                if not ev:
-                    continue
+                handle_block(block)
 
-                # 映射成云端事件类型
-                if ev == "ai_chunk" and (data or {}).get("text"):
-                    text_all.append(data["text"])
-                    on_event({"type": "chunk", "payload": {"text": data["text"]}})
-                elif ev == "ai_thinking" and (data or {}).get("text"):
-                    on_event({"type": "thinking", "payload": {"text": data["text"]}})
-                elif ev == "ai_tool_start":
-                    on_event({"type": "tool_start", "payload": data})
-                elif ev == "ai_tool_done":
-                    tools_done.append(data)
-                    on_event({"type": "tool_done", "payload": data})
-                elif ev == "ai_usage":
-                    on_event({"type": "usage", "payload": data})
-                elif ev == "ai_error":
-                    on_event({"type": "error", "payload": data})
-                elif ev == "ai_done":
-                    on_event({"type": "done", "payload": data})
+        # 流结束：处理残留内容（可能是最后一个没带 \n\n 的事件）
+        tail = buf.strip()
+        if tail:
+            handle_block(tail)
 
     return {"text": "".join(text_all), "tools": tools_done}
 
@@ -325,6 +399,25 @@ def exec_command(state: dict, cmd: dict):
     try:
         # ---------------- chat ----------------
         if kind == "chat":
+            # ★ 兼容两种入参：
+            #     a) messages: [{role, content}, ...]  —— 完整对话
+            #     b) prompt: "一句话"                  —— 便捷简写（控制台默认用这个）
+            if not payload.get("messages") and payload.get("prompt"):
+                payload = dict(payload)
+                payload["messages"] = [{"role": "user", "content": str(payload["prompt"])}]
+
+            if not payload.get("messages"):
+                flush(force=True)
+                report(state, cid, [], done=True,
+                       error="chat 指令缺少内容（需要 payload.prompt 或 payload.messages）",
+                       session_id=sid)
+                return
+
+            # 每次对话用稳定的会话名，便于在 Prism 里连续追问
+            if not payload.get("session_name"):
+                payload = dict(payload)
+                payload["session_name"] = f"remote-{state.get('device_id', 'dev')[-6:]}"
+
             r = chat_stream(payload, on_event)
             flush(force=True)
             report(state, cid, [], done=True,
@@ -332,8 +425,20 @@ def exec_command(state: dict, cmd: dict):
 
         # ---------------- tool ----------------
         elif kind == "tool":
-            tn = payload.get("tool_name")
-            args = payload.get("arguments") or {}
+            # ★ 兼容两套字段名（控制台历史版本用 tool/input，MCP 侧用 tool_name/arguments）
+            tn = payload.get("tool_name") or payload.get("tool") or payload.get("name")
+            args = payload.get("arguments")
+            if args is None:
+                args = payload.get("input")
+            if args is None:
+                args = payload.get("args")
+            args = args or {}
+
+            if not tn or tn == "None":
+                flush(force=True)
+                report(state, cid, [], error="指令缺少工具名（应为 payload.tool_name）", session_id=sid)
+                return
+
             sys_p = ("你是工具执行器。用户会指定一个工具名和参数，"
                      "你必须立即发起该工具的 tool_calls，不要解释、不要闲聊、不要修改参数。"
                      "只调用这一个工具，然后简短说明结果。")
@@ -494,9 +599,12 @@ def main():
 
     global GATEWAY, PRISM_URL
     if args.gateway:
-        GATEWAY = args.gateway.rstrip("/")
+        GATEWAY = _normalize_gateway(args.gateway)
     if args.prism:
         PRISM_URL = args.prism.rstrip("/")
+        PRISM_URL = re.sub(r"/(api|api/v1)$", "", PRISM_URL)
+
+    log(f"网关地址 = {GATEWAY}")
 
     state = {} if args.reset else load_state()
     state = do_register(state, args.name)

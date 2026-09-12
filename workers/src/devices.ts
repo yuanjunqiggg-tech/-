@@ -148,6 +148,9 @@ export async function deviceRegister(req: Request, env: DeviceEnv): Promise<Resp
   }
 
   // --- 首次注册 ---
+  //   ★ last_seen 初始化为 0（而非 now）：
+  //     注册只是一次 HTTP 握手，不代表被控端真的在跑。
+  //     只有收到第一次心跳后才算「在线」，避免控制端显示假在线。
   const deviceId = rid('dev');
   const token = rid('dtk', 32);
   await env.DB.prepare(
@@ -162,7 +165,7 @@ export async function deviceRegister(req: Request, env: DeviceEnv): Promise<Resp
       b.platform || 'android',
       b.model || '', b.android_ver || '', b.app_ver || '',
       b.prism_port ?? 8080, b.memo || '',
-      now, now,
+      0, now,
     )
     .run();
 
@@ -325,44 +328,79 @@ export async function deviceReport(req: Request, env: DeviceEnv): Promise<Respon
       ),
     );
     await env.DB.batch(stmts);
+  }
 
-    // --- 抓包数据单独落库，便于历史回看 ---
-    const pktEvents = events.filter((e) => e.type === 'packet');
-    if (pktEvents.length) {
-      const pstmts = pktEvents.slice(0, 200).map((e) => {
-        const p = e.payload || {};
-        const fieldsStr = typeof p.fields === 'string' ? p.fields : JSON.stringify(p.fields ?? null);
-        const raw = (p.raw_hex || '').toString();
-        return env.DB.prepare(
-          `INSERT INTO device_packets
-             (device_id, packet_seq, packet_type, packet_id, direction, bot_index,
-              fields, raw_hex, size, captured_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?)`,
-        ).bind(
-          deviceId,
-          p.seq ?? null,
-          p.packet_type ?? p.type ?? null,
-          p.packet_id ?? null,
-          p.direction ?? null,
-          p.bot ?? p.bot_index ?? 0,
-          fieldsStr,
-          raw.slice(0, 4000),
-          raw.length / 2,
-          now,
-        );
-      });
-      await env.DB.batch(pstmts);
-    }
+  // --- 抓包数据单独落库，便于历史回看 ---
+  //   抓包有两个来源：
+  //     1) events 里 type='packet' 的条目
+  //     2) 顶层 packets[] 数组（推荐用法，被控端批量回传时用这个）
+  //   两者的字段名都做兼容（packet_type/type、payload 内嵌/顶层平铺）
+  const pktEvents: any[] = events.filter((e) => e.type === 'packet');
+  const rawPkts: any[] = Array.isArray(b.packets) ? b.packets : [];
+  const allPkts = [...pktEvents.map((e) => ({ _env: true, e })), ...rawPkts.map((p) => ({ _env: false, p }))];
+
+  if (allPkts.length) {
+    const pstmts = allPkts.slice(0, 200).map((item: any) => {
+      // 统一取字段：优先顶层，其次 payload/data 内层
+      const src = item._env ? (item.e.payload ?? item.e.data ?? {}) : item.p;
+      const wrap = item._env ? item.e : {};
+      const p = (src && typeof src === 'object') ? src : {};
+
+      const ptype = p.packet_type ?? p.type ?? wrap.packet_type ?? null;
+      const rawHex = (p.raw_hex ?? p.raw ?? wrap.raw_hex ?? '').toString();
+      const fieldsRaw = p.fields ?? wrap.fields ?? null;
+      const fieldsStr =
+        fieldsRaw == null ? null
+          : typeof fieldsRaw === 'string' ? fieldsRaw
+            : JSON.stringify(fieldsRaw);
+
+      // size：显式给了就用，否则按 hex 字节长度推算
+      const sizeVal = Number.isFinite(p.size) ? p.size
+        : Number.isFinite(wrap.size) ? wrap.size
+          : Math.floor(rawHex.length / 2);
+
+      return env.DB.prepare(
+        `INSERT INTO device_packets
+           (device_id, packet_seq, packet_type, packet_id, direction, bot_index,
+            fields, raw_hex, size, captured_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      ).bind(
+        deviceId,
+        p.seq ?? wrap.seq ?? null,
+        ptype,
+        p.packet_id ?? wrap.packet_id ?? null,
+        p.direction ?? wrap.direction ?? null,
+        p.bot ?? p.bot_index ?? wrap.bot_index ?? 0,
+        fieldsStr,
+        rawHex.slice(0, 4000),
+        sizeVal,
+        Number.isFinite(p.captured_at) ? p.captured_at : (Number.isFinite(wrap.captured_at) ? wrap.captured_at : now),
+      );
+    });
+    await env.DB.batch(pstmts);
   }
 
   // --- 指令收尾 ---
-  if (cmdId && (b.done || b.error)) {
+  //   ★ 只认「显式」结束信号：b.done / b.error。
+  //
+  //   踩坑记录：曾被 events 里的 type='done' 误触发收尾。
+  //   问题在于被控端做事件攒批上报时，Prism 流里的 ai_done 会被映射成
+  //   {type:'done'} 混在中间批次里一起发上来，导致指令在「结果还没回传」
+  //   时就被标记完成；等真正带 result 的那次 report 到达时，
+  //   status 已是 done，UPDATE 的 status IN ('pending','taken') 条件不成立，
+  //   结果被静默丢弃（表现为指令 done 但 result=null）。
+  //
+  //   约定：被控端在指令真正执行完毕时，必须发一次 done=true（可带 result）。
+  const shouldFinish = !!cmdId && (b.done === true || !!b.error);
+
+  if (shouldFinish) {
+    const failed = !!b.error;
     await env.DB.prepare(
       `UPDATE device_commands SET status=?, result=?, error=?, finished_at=?
        WHERE id=? AND device_id=?`,
     )
       .bind(
-        b.error ? 'failed' : 'done',
+        failed ? 'failed' : 'done',
         b.result === undefined ? null : JSON.stringify(b.result),
         b.error ?? null,
         now, cmdId, deviceId,
@@ -375,7 +413,7 @@ export async function deviceReport(req: Request, env: DeviceEnv): Promise<Respon
     .bind(now, deviceId)
     .run();
 
-  return jok({ accepted: events.length });
+  return jok({ accepted: events.length, packets: allPkts.length, finished: shouldFinish });
 }
 
 // ------------------------------------------------------------

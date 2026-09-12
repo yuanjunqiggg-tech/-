@@ -792,7 +792,10 @@ export default {
     }
 
     // 健康检查 / 状态（无需鉴权，便于面板探测）
-    if (path === '/health' || path === '/api/v1/ai-assist/health') {
+    //   /health               —— 网关存活 + Prism 隧道可达性
+    //   /api/v1/health        —— 同上（带前缀，供前端统一调用）
+    //   /api/v1/ai-assist/health —— 兼容旧路径
+    if (path === '/health' || path === '/api/v1/health' || path === '/api/v1/ai-assist/health') {
       return health(req, env);
     }
 
