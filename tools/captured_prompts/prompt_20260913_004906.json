@@ -1,0 +1,14 @@
+{
+  "model": "auto",
+  "messages": [
+    {
+      "role": "system",
+      "content": "[捕获测试] 这是模拟的系统提示词"
+    },
+    {
+      "role": "user",
+      "content": "测试"
+    }
+  ],
+  "stream": true
+}

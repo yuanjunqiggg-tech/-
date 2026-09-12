@@ -1,0 +1,13 @@
+{
+  "model": "auto",
+  "stream": true,
+  "stream_options": {
+    "include_usage": true
+  },
+  "tool_choice": "auto",
+  "message_count": 2,
+  "tool_count": 29,
+  "system_prompt_chars": 585,
+  "captured_at": "2026-09-13 00:49",
+  "upstream": "https://prism.adblanlu.qzz.io/api/prism/ai"
+}
