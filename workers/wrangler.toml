@@ -42,5 +42,5 @@ PRISM_TUNNEL_URL = "https://prism.youyuanqi.dpdns.org"
 # 注意：如果 api.youyuanqi.dpdns.org 已被现有 worker 占用，
 # 请改用 ai-api.youyuanqi.dpdns.org 或复用现有 worker 增加路由
 routes = [
-  { pattern = "ai-api.youyuanqi.dpdns.org", custom_domain = true }
+  { pattern = "ai-api.youyuanqi.dpdns.org/*", zone_name = "youyuanqi.dpdns.org" }
 ]

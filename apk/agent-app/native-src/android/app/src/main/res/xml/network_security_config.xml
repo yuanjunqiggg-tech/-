@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置
+
+  被控端需要访问本机 Prism（http://127.0.0.1:8080），这是明文 HTTP。
+  Android 9+ 默认禁止明文流量，所以必须显式放行 —— 但只放行本机，
+  对外部域名仍然强制 HTTPS，避免把整个 App 的流量降级。
+
+  注意：云手机平台上 Prism 一般也跑在同一个实例里，所以 127.0.0.1
+  就够了；如果将来 Prism 跑在别的内网地址，在这里追加 domain 即可。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">::1</domain>
+        <!-- 云手机常见的局域网网关地址段，Prism 有时被配置成监听 0.0.0.0 -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+
+    <!-- 其余一律走 HTTPS -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

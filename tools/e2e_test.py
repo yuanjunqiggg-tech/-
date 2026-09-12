@@ -24,6 +24,12 @@ import urllib.request
 # 强制绕过代理
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
+# ★ 必须带正常 User-Agent：Cloudflare 会对 urllib/3.x 这类 UA 返回
+#   "error code: 1010"（浏览器完整性检查拦截），看起来像 403 权限问题，
+#   实际只是 UA 被 WAF 拒了。
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " \
+     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 PASS = 0
 FAIL = 0
 RESULTS = []
@@ -43,7 +49,11 @@ def chk(name, cond, extra=""):
 
 def make_caller(base):
     def call(method, path, body=None, headers=None, timeout=40):
-        h = {"Content-Type": "application/json"}
+        h = {
+            "Content-Type": "application/json",
+            "User-Agent": UA,
+            "Accept": "application/json",
+        }
         if headers:
             h.update({k: v for k, v in headers.items() if v is not None})
         data = json.dumps(body).encode() if body is not None else None

@@ -8,9 +8,16 @@ build/
 *.apk
 *.aab
 *.keystore
-android/
-ios/
 .gradle/
+
+# Capacitor 生成的 Android/iOS 工程（体积大且可重现）
+#
+# ★ 注意：这里必须写完整路径，不能用裸的 `android/`。
+#   因为 `android/` 会匹配任意层级下名为 android 的目录，
+#   会把 apk/agent-app/native-src/android/ 一起忽略掉 ——
+#   而那里放的正是我们自己写的原生源码，必须进版本库。
+apk/agent-app/android/
+apk/agent-app/ios/
 
 # 本地状态与凭据
 agent_state.json
@@ -18,6 +25,13 @@ agent_state.json
 .dev.vars
 wrangler.local.toml
 .wrangler/
+
+# ★ 控制台构建产物 —— 里面内联了 PLATFORM_ACCESS_KEY，绝不能提交
+.pages_dist/
+
+# 备份文件
+*.bak
+*.orig
 
 # 抓包与日志
 tools/captured_prompts/*.json

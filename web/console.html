@@ -355,6 +355,13 @@ body{
 // 配置
 // ============================================================
 const CFG_KEY = 'prism_cfg_v2';
+
+// ---------- 构建时注入的默认配置 ----------
+// 占位符由 tools/build_console.py 在部署前替换，本地直接打开时保持为空。
+const DEFAULT_ENDPOINT = '__PRISM_ENDPOINT__';
+const DEFAULT_KEY      = '__PRISM_KEY__';
+const _hasInjected = !/^__/.test(DEFAULT_ENDPOINT);
+
 let cfg = loadCfg();
 let devices = [];
 let cur = null;            // 当前设备
@@ -366,10 +373,20 @@ let cacheToolList = [];
 
 function loadCfg(){
   try{
-    return JSON.parse(localStorage.getItem(CFG_KEY)) || {
-      endpoint:'https://ai-api.youyuanqi.dpdns.org', key:''
-    };
-  }catch(e){ return {endpoint:'https://ai-api.youyuanqi.dpdns.org', key:''}; }
+    const saved = JSON.parse(localStorage.getItem(CFG_KEY));
+    // 已保存的配置优先；但若已注入默认值且用户没填密钥，则用注入值补上
+    if(saved && saved.key) return saved;
+    if(_hasInjected){
+      return {
+        endpoint: (saved && saved.endpoint) || DEFAULT_ENDPOINT,
+        key: DEFAULT_KEY
+      };
+    }
+    return saved || { endpoint:'https://ai-api.youyuanqi.dpdns.org', key:'' };
+  }catch(e){
+    if(_hasInjected) return { endpoint:DEFAULT_ENDPOINT, key:DEFAULT_KEY };
+    return {endpoint:'https://ai-api.youyuanqi.dpdns.org', key:''};
+  }
 }
 function saveCfg(){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
 

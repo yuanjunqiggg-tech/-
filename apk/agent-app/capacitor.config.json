@@ -1,0 +1,13 @@
+{
+  "appId": "com.prism.agent",
+  "appName": "Prism 被控端",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

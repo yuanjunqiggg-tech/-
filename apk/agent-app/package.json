@@ -1,0 +1,17 @@
+{
+  "name": "prism-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Prism 被控端 —— 云手机常驻，接收云端指令并驱动本机 Prism",
+  "scripts": {
+    "sync": "cap sync android",
+    "build": "cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/core": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0"
+  }
+}
