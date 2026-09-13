@@ -50,9 +50,16 @@ const TOOLS: any[] = [
   },
   {
     name: 'prism_tool',
-    description:
-      '调用 Prism 内置的某个工具（如 list_packets / send_packet / query_packets 等，' +
-      '共 29 个）。工具在 Prism 进程内执行。不传 device_id 时用最近在线的设备。',
+      description:
+        '调用 Prism 内置的某个工具（共 29 个）。工具在 Prism 进程内执行。' +
+        '不传 device_id 时用最近在线的设备。\n' +
+        '★ 这是权限最大的一个工具，等于把 Prism 的能力整个交给外部 AI：\n' +
+        '  · write_plugin_file / lua_call —— 改写 Prism 的插件与底层行为\n' +
+        '  · game_call / send_command_wait_output —— 直接操作游戏内\n' +
+        '  · system_shell —— 在云主机上跑 shell 命令【高危】\n' +
+        '  · read_file / write_file / edit_lines / list_dir —— 读写云主机文件\n' +
+        '  · listen_packet / send_packet / query_packets —— 抓包与发包\n' +
+        '调用前确认这是你想要的；密钥等同于这些权限，别外泄。',
     inputSchema: {
       type: 'object',
       properties: {
