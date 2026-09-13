@@ -277,14 +277,28 @@ async function cloud(path, method='GET', body){
   return j;
 }
 
-async function prism(path, timeoutMs=8000){
+/**
+ * 调本机 Prism 的任意 REST 端点。
+ *
+ * ★ method / body 必须支持 —— Prism 大量能力是 POST 的
+ *   （bot/console、bot/connect、plugin/run、mcfunction/execute、task/start…），
+ *   只做 GET 的话外部 AI 就只能读不能动。
+ */
+async function prism(path, timeoutMs=8000, method='GET', body){
   const base = `http://127.0.0.1:${st.prism_port||8080}`;
   const ctl = new AbortController();
   const tm = setTimeout(()=>ctl.abort(), timeoutMs);
   try{
-    const r = await fetch(base+path, {signal:ctl.signal});
+    const opt = {signal:ctl.signal, method};
+    if(body !== undefined && body !== null && method !== 'GET'){
+      opt.headers = {'Content-Type':'application/json'};
+      opt.body = (typeof body === 'string') ? body : JSON.stringify(body);
+    }
+    const r = await fetch(base+path, opt);
     clearTimeout(tm);
-    return await r.json();
+    const txt = await r.text();
+    try{ return JSON.parse(txt); }
+    catch(e){ return {ok:r.ok, status:r.status, raw:txt.slice(0,2000)}; }
   }catch(e){
     clearTimeout(tm);
     throw e;
@@ -770,7 +784,9 @@ async function execCommand(cmd){
       await runTool({ tool_name:'send_packet',
         arguments:{ type:p.packet_type, data:p.data||{} } });
     }else if(cmd.kind === 'prism_rest'){
-      const r = await prism(p.path||'/api/bot/status', 20000);
+      // ★ 支持任意方法 + body：这是「外部 AI 直接操作 Prism」的主通道
+      const r = await prism(p.path||'/api/bot/status', p.timeout_ms||20000,
+                            (p.method||'GET').toUpperCase(), p.body);
       await finishCmd(r, null);
 
     // ---- Prism 会话持久化（AI帮写 的对话记录）----

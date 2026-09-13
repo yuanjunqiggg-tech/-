@@ -194,9 +194,22 @@ public final class NativePoller {
                     case "tool":
                         result = doTool(payload);
                         break;
-                    case "prism_rest":
-                        result = prismGet(payload.optString("path", "/api/bot/status"));
+                    case "prism_rest": {
+                        // ★ 支持任意方法 + body。
+                        //   这是「外部 AI 直接操作 Prism」的主通道 ——
+                        //   Prism 的绝大多数能力是 POST 的
+                        //   （bot/console、bot/connect、plugin/run、
+                        //     mcfunction/execute、task/start、draw/* …），
+                        //   只做 GET 就等于只能读不能动。
+                        String m = payload.optString("method", "GET").toUpperCase();
+                        JSONObject b = payload.optJSONObject("body");
+                        if (b == null && payload.has("body") && payload.opt("body") instanceof String) {
+                            // 允许调用方直接塞 JSON 字符串
+                            try { b = new JSONObject(payload.optString("body")); } catch (Exception ignored) {}
+                        }
+                        result = prismPost(payload.optString("path", "/api/bot/status"), b, m);
                         break;
+                    }
                     case "session_list":
                         result = prismGet("/api/ai/sessions?plugin_id="
                                 + enc(payload.optString("plugin_id")));

@@ -1,0 +1,293 @@
+{
+ "accounts": [
+  "/api/accounts",
+  "/api/accounts/active"
+ ],
+ "admin": [
+  "/api/admin/nuts/adjustmissing",
+  "/api/admin/nutsallow_anonymous"
+ ],
+ "ai": [
+  "/api/ai/answer",
+  "/api/ai/chat",
+  "/api/ai/models",
+  "/api/ai/models/fetch",
+  "/api/ai/sessions",
+  "/api/ai/sessions/load",
+  "/api/ai/sessions/recent",
+  "/api/ai/sessions/rename",
+  "/api/ai/skills",
+  "/api/ai/snapshot",
+  "/api/ai/snapshot/restore"
+ ],
+ "announcements": [
+  "/api/announcements"
+ ],
+ "auth": [
+  "/api/auth/login",
+  "/api/auth/me",
+  "/api/auth/nuts"
+ ],
+ "bot": [
+  "/api/bot/connect",
+  "/api/bot/console",
+  "/api/bot/disconnect",
+  "/api/bot/status"
+ ],
+ "building": [
+  "/api/building/analyze",
+  "/api/building/voxel"
+ ],
+ "cache": [
+  "/api/cache/clear"
+ ],
+ "camera": [
+  "/api/camera/clear",
+  "/api/camera/generate",
+  "/api/camera/shot/delete",
+  "/api/camera/shot/update",
+  "/api/camera/shots",
+  "/api/camera/start",
+  "/api/camera/status",
+  "/api/camera/stop",
+  "/api/camera/stop/api/camera/testPlayerSkin",
+  "/api/camera/test",
+  "/api/camera/test/all"
+ ],
+ "cb": [
+  "/api/cb/export/save",
+  "/api/cb/export/scan",
+  "/api/cb/import/preview",
+  "/api/cb/import/start"
+ ],
+ "config": [
+  "/api/config"
+ ],
+ "draw": [
+  "/api/draw/apply",
+  "/api/draw/close",
+  "/api/draw/create",
+  "/api/draw/palette",
+  "/api/draw/redo",
+  "/api/draw/state",
+  "/api/draw/stroke",
+  "/api/draw/sync",
+  "/api/draw/undo"
+ ],
+ "eventsx509": [
+  "/api/eventsx509"
+ ],
+ "file": [
+  "/api/file/upload"
+ ],
+ "files": [
+  "/api/files/read",
+  "/api/files/scan"
+ ],
+ "fleet": [
+  "/api/fleet/connect",
+  "/api/fleet/disconnect",
+  "/api/fleet/status"
+ ],
+ "fly": [
+  "/api/fly",
+  "/api/fly/position",
+  "/api/fly/status"
+ ],
+ "itemmaker": [
+  "/api/itemmaker/generate"
+ ],
+ "map": [
+  "/api/map/display",
+  "/api/map/play",
+  "/api/map/scan",
+  "/api/map/stop"
+ ],
+ "mapart": [
+  "/api/mapart/preview"
+ ],
+ "market-proxy": [
+  "/api/market-proxy",
+  "/api/market-proxy/api/market/files",
+  "/api/market-proxy/api/market/parts"
+ ],
+ "market": [
+  "/api/market/categories",
+  "/api/market/comments",
+  "/api/market/contribute",
+  "/api/market/download",
+  "/api/market/files",
+  "/api/market/files/GIF",
+  "/api/market/my",
+  "/api/market/upload",
+  "/api/market/upload/precheck"
+ ],
+ "marquee": [
+  "/api/marquee/preview",
+  "/api/marquee/start",
+  "/api/marquee/status",
+  "/api/marquee/stop"
+ ],
+ "mcfunction": [
+  "/api/mcfunction/execute",
+  "/api/mcfunction/parse",
+  "/api/mcfunction/status",
+  "/api/mcfunction/stop"
+ ],
+ "music-proxy": [
+  "/api/music-proxy",
+  "/api/music-proxy/api/music/download",
+  "/api/music-proxy/api/music/hot"
+ ],
+ "music": [
+  "/api/music/actionbar",
+  "/api/music/loop",
+  "/api/music/next",
+  "/api/music/note",
+  "/api/music/pause",
+  "/api/music/play",
+  "/api/music/prev",
+  "/api/music/queue/add",
+  "/api/music/queue/clear",
+  "/api/music/queue/remove",
+  "/api/music/resume",
+  "/api/music/status",
+  "/api/music/stop",
+  "/api/music/upload"
+ ],
+ "new": [
+  "/api/new"
+ ],
+ "node": [
+  "/api/node/byehistory_bytesdisabled",
+  "/api/node/heartbeatreflect",
+  "/api/node/register",
+  "/api/node/start",
+  "/api/node/status",
+  "/api/node/stop"
+ ],
+ "parse": [
+  "/api/parse/cancel"
+ ],
+ "pathfinder": [
+  "/api/pathfinder/log"
+ ],
+ "phoenix": [
+  "/api/phoenix/login",
+  "/api/phoenix/tan_lobby_create",
+  "/api/phoenix/tan_lobby_loginenter",
+  "/api/phoenix/transfer_check_num",
+  "/api/phoenix/transfer_start_type"
+ ],
+ "players": [
+  "/api/players/list"
+ ],
+ "plugin-market-proxy": [
+  "/api/plugin-market-proxy"
+ ],
+ "plugin-market": [
+  "/api/plugin-market/categories",
+  "/api/plugin-market/comments",
+  "/api/plugin-market/contribute",
+  "/api/plugin-market/files",
+  "/api/plugin-market/install",
+  "/api/plugin-market/my",
+  "/api/plugin-market/upload/precheck",
+  "/api/plugin-market/uploadMIDI"
+ ],
+ "plugin": [
+  "/api/plugin/api-doc",
+  "/api/plugin/config",
+  "/api/plugin/create",
+  "/api/plugin/data",
+  "/api/plugin/delete",
+  "/api/plugin/disabled",
+  "/api/plugin/export",
+  "/api/plugin/export-saf",
+  "/api/plugin/file/read",
+  "/api/plugin/file/write",
+  "/api/plugin/import",
+  "/api/plugin/list",
+  "/api/plugin/meta",
+  "/api/plugin/reload",
+  "/api/plugin/run",
+  "/api/plugin/stop",
+  "/api/plugin/wordbank-doc"
+ ],
+ "preview": [
+  "/api/preview/cancel",
+  "/api/preview/generate",
+  "/api/preview/generate-gif",
+  "/api/preview/render-isometric/api/plugin-market/contribute",
+  "/api/preview/save-image",
+  "/api/preview/scan",
+  "/api/preview/status",
+  "/api/preview/zip",
+  "/api/preview/zip-building"
+ ],
+ "prism-proxy": [
+  "/api/prism-proxy",
+  "/api/prism-proxy/api/music-proxy"
+ ],
+ "prism": [
+  "/api/prism/aino"
+ ],
+ "push": [
+  "/api/push/ack",
+  "/api/push/pending"
+ ],
+ "repair": [
+  "/api/repair/start"
+ ],
+ "server": [
+  "/api/server/detail",
+  "/api/server/find",
+  "/api/server/owner",
+  "/api/server/players"
+ ],
+ "skin": [
+  "/api/skin/build",
+  "/api/skin/head",
+  "/api/skin/online-build",
+  "/api/skin/online-head",
+  "/api/skin/online-list",
+  "/api/skin/online-preview",
+  "/api/skin/preview",
+  "/api/skin/voxel"
+ ],
+ "social": [
+  "/api/social/search"
+ ],
+ "system": [
+  "/api/system/restart"
+ ],
+ "task": [
+  "/api/task/delete",
+  "/api/task/list",
+  "/api/task/resume",
+  "/api/task/start",
+  "/api/task/stop"
+ ],
+ "toolbox": [
+  "/api/toolbox/my-info",
+  "/api/toolbox/my-info/update",
+  "/api/toolbox/nuts/balance",
+  "/api/toolbox/purchase/extension",
+  "/api/toolbox/purchase/extensionMULTI",
+  "/api/toolbox/purchase/name",
+  "/api/toolbox/purchase/name/api/plugin-market/installfill",
+  "/api/toolbox/purchase/prompt",
+  "/api/toolbox/start-trial"
+ ],
+ "v1": [
+  "/api/v1/harbor/mcrealms"
+ ],
+ "v2": [
+  "/api/v2/heartbeat/ackevents",
+  "/api/v2/heartbeatcom",
+  "/api/v2/version/check/api/v2/announcementsexec"
+ ],
+ "version": [
+  "/api/version/check"
+ ]
+}

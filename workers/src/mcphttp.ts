@@ -51,6 +51,12 @@ const TOOLS: any[] = [
   {
     name: 'prism_tool',
       description:
+        '⚠ 这个工具是「让 Prism 内置 AI 帮你调工具」，中间隔了一层 AI。\n' +
+        '  它的身份是「插件开发助手」，经常会拒绝执行、或干脆不发起 tool_call，' +
+        '  返回 executed=false。\n' +
+        '★ 想直接操作，优先用 prism_rest（自己就是执行者，不经任何 AI）。\n' +
+        '  只有 prism_rest 里找不到对应端点时，才退回用这个。\n' +
+        '\n' +
         '调用 Prism 内置的某个工具（共 29 个）。工具在 Prism 进程内执行。' +
         '不传 device_id 时用最近在线的设备。\n' +
         '★ 这是权限最大的一个工具，等于把 Prism 的能力整个交给外部 AI：\n' +
@@ -74,13 +80,37 @@ const TOOLS: any[] = [
   {
     name: 'prism_rest',
     description:
-      '直连云手机里 Prism 的本地 REST 端点（如 /api/bot/status、/api/ai/models、/api/plugin/list）。',
+      '★ 直接操作 Prism 的主通道 —— 不经任何 AI，你自己就是执行者。\n' +
+      'Prism 有一百多个本机 REST 端点，绝大多数能力都在这里，支持任意 HTTP 方法。\n' +
+      '\n' +
+      '【直接操作机器人 / 游戏】\n' +
+      '  POST /api/bot/console        {"input":"say 你好"}  ← 给机器人发命令\n' +
+      '  POST /api/bot/connect        {"token","server","use_new_protocol","auth","password"} ← 连机器人\n' +
+      '  GET  /api/bot/status         机器人连没连、在哪个服、是不是 OP\n' +
+      '  POST /api/mcfunction/execute {"content","global","groups","tests"} ← 批量执行指令\n' +
+      '  GET  /api/mcfunction/status  执行进度\n' +
+      '【移动 / 飞行】/api/fly/start|stop|jump|down|look|move|teleport|position|sprint-start…\n' +
+      '【插件】/api/plugin/list|run|stop|reload|delete|import|export|create|config\n' +
+      '        POST /api/plugin/run {"id":"插件id"}\n' +
+      '        GET  /api/plugin/file/read?id=..&scope=code|docs&file=..\n' +
+      '        POST /api/plugin/file/write\n' +
+      '【文件】/api/files/scan|read|write\n' +
+      '【任务】/api/task/list|start|stop|resume|delete    GET /api/task/list\n' +
+      '【节点】/api/node/status|start|stop\n' +
+      '【AI帮写会话】/api/ai/sessions（GET 列表 / POST 保存 / DELETE 删除）\n' +
+      '              /api/ai/sessions/load /recent /rename\n' +
+      '【模型】/api/ai/models、/api/ai/models/fetch\n' +
+      '【地图绘制】/api/draw/create|stroke|apply|state|undo|redo|palette\n' +
+      '【音乐】/api/music/play|stop|note|queue|upload\n' +
+      '【皮肤/相机/预览】/api/skin/*、/api/camera/*、/api/preview/*\n' +
+      '\n' +
+      '调用前先 GET /api/bot/status 确认机器人状态；写操作要谨慎，直接影响云手机。',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '如 /api/bot/status' },
-        method: { type: 'string', description: 'GET / POST，默认 GET' },
-        body: { type: 'object', description: 'POST 时的请求体' },
+        path: { type: 'string', description: '如 /api/bot/console' },
+        method: { type: 'string', description: 'GET / POST / DELETE，默认 GET' },
+        body: { type: 'object', description: 'POST/DELETE 时的 JSON 请求体' },
         device_id: { type: 'string', description: '可选，指定设备' },
       },
       required: ['path'],
