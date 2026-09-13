@@ -114,7 +114,7 @@ export async function pcPoll(db: any, body: any) {
   for (const s of sessions) {
     const msgs = await db
       .prepare(
-        "SELECT id, role, text FROM pc_msg WHERE session_id=? AND role='user' AND id > ? ORDER BY id ASC",
+        "SELECT id, role, text FROM pc_msg WHERE session_id=? AND role IN ('user','file') AND id > ? ORDER BY id ASC",
       )
       .bind(s.id, Number(s.last_input_id || 0))
       .all();
@@ -179,6 +179,38 @@ export async function pcInput(db: any, body: any) {
     .bind(now, id)
     .run();
   return { ok: true };
+}
+
+/**
+ * 手机把文件送过去。
+ *   {session_id, path, content_base64}
+ * 存在 pc_msg 里 role='file'，电脑领活时落盘。
+ * 限制 1.5MB（base64 后约 2MB），再大走别的通道。
+ */
+export async function pcUpload(db: any, body: any) {
+  await ensurePcTables(db);
+  const id = String(body?.session_id || body?.id || '').trim();
+  const path = String(body?.path || '').trim();
+  const b64 = String(body?.content_base64 || '');
+  if (!id) throw new Error('缺少 session_id');
+  if (!path) throw new Error('缺少 path');
+  if (!b64) throw new Error('缺少 content_base64');
+  if (b64.length > 2_000_000) throw new Error('文件太大（上限约 1.5MB），换个方式传');
+
+  const now = Date.now();
+  const payload = JSON.stringify({ path, content_base64: b64 });
+  await db
+    .prepare('INSERT INTO pc_msg (session_id, role, text, created_at) VALUES (?,?,?,?)')
+    .bind(id, 'file', payload, now)
+    .run();
+  // 已经跑完的会话被追加文件 → 重新置 pending 让电脑处理
+  await db
+    .prepare(
+      "UPDATE pc_session SET status='pending', updated_at=? WHERE id=? AND status IN ('done','error')",
+    )
+    .bind(now, id)
+    .run();
+  return { ok: true, bytes: Math.floor(b64.length * 3 / 4) };
 }
 
 export async function pcMessages(db: any, sessionId: string, since: number) {

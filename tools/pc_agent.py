@@ -86,6 +86,25 @@ def http_json(url, method="GET", body=None, key=None, timeout=30):
         return {"raw": raw}
 
 
+def write_file(path, content_base64, cwd):
+    """把手机传过来的文件落盘。相对路径算在会话工作目录下。"""
+    import base64
+
+    p = os.path.expanduser(path)
+    if not os.path.isabs(p):
+        p = os.path.join(cwd or os.getcwd(), p)
+    p = os.path.abspath(p)
+    # 别让 ../ 跑到工作目录外面去
+    root = os.path.abspath(cwd or os.getcwd())
+    if os.path.commonpath([p, root]) != root:
+        raise ValueError(f"不允许写到工作目录之外：{path}")
+
+    os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+    with open(p, "wb") as f:
+        f.write(base64.b64decode(content_base64))
+    return f"{p}  ({os.path.getsize(p)} 字节)"
+
+
 def detect_clis():
     """探测这台电脑上装了哪些 AI CLI"""
     found = {}
@@ -212,9 +231,35 @@ def main():
                 inputs = s.get("pending_inputs") or []
                 if not inputs:
                     continue
-                # 只跑最新一条（前面几条如果没处理就合并进去，避免丢话）
-                texts = [i["text"] for i in inputs]
                 last_id = max(int(i["id"]) for i in inputs)
+
+                # ★ 先把要落盘的文件写掉（role='file'），再处理要说的话
+                saved = []
+                for i in inputs:
+                    if i.get("role") != "file":
+                        continue
+                    try:
+                        payload = json.loads(i["text"])
+                        saved.append(write_file(payload["path"], payload["content_base64"], cwd))
+                    except Exception as e:
+                        saved.append(f"[写入失败] {e}")
+                if saved:
+                    http_json(out_url, "POST", {
+                        "session_id": sid, "role": "system",
+                        "text": "已收到文件：\n" + "\n".join("  " + x for x in saved),
+                    }, key=args.key)
+
+                # 只跑最新一条（前面几条如果没处理就合并进去，避免丢话）
+                texts = [i["text"] for i in inputs if i.get("role") == "user"]
+                if not texts:
+                    # 只传了文件、没说话 —— 记一笔就结束这一轮
+                    http_json(out_url, "POST", {
+                        "session_id": sid, "role": "system", "text": "",
+                        "done": True, "status": "done",
+                    }, key=args.key)
+                    seen_input[sid] = last_id
+                    print(f"◀ 会话 {sid[:12]}… 只收文件，已落盘")
+                    continue
                 message = texts[-1]
                 if len(texts) > 1:
                     message = "\n".join(texts)

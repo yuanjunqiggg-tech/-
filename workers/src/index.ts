@@ -31,7 +31,7 @@ import { runOnDevice, pickDevice, streamCommandSSE } from './relay';
 import { AI_ASSIST_PARTS, buildAiAssistContext } from './aicontext';
 import { agentList, ensureInboxAgentNo, agentUpsert } from './agents';
 import {
-  pcCreateSession, pcListSessions, pcPoll, pcClaim, pcOutput, pcInput, pcMessages,
+  pcCreateSession, pcListSessions, pcPoll, pcClaim, pcOutput, pcInput, pcMessages, pcUpload,
 } from './pcbridge';
 
 /**
@@ -1065,6 +1065,12 @@ export default {
         let b: any = {};
         try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
         try { return ok(await pcInput(env.DB, b)); }
+        catch (e: any) { return fail(e?.message || String(e), 400); }
+      }
+      if (path === '/api/v1/pc/upload' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+        try { return ok(await pcUpload(env.DB, b)); }
         catch (e: any) { return fail(e?.message || String(e), 400); }
       }
       if (path === '/api/v1/pc/messages' && req.method === 'GET') {
