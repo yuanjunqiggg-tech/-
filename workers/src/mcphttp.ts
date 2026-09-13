@@ -200,6 +200,50 @@ const TOOLS: any[] = [
       required: [],
     },
   },
+  {
+    name: 'bot_keeper',
+    description:
+      '机器人连接守护 —— 让云手机里的机器人「掉线自动重连」。\n' +
+      '\n' +
+      '为什么需要它：Prism 内置的「AI帮写」自己不会重连。机器人一掉线，\n' +
+      '它只会在系统提示词里写一句「机器人当前未连接，game_call 工具会返回错误，\n' +
+      '不要依赖它」，然后干等用户手动去 Prism 界面点连接。结果是 AI 越用越哑。\n' +
+      '这个工具就是补上这个短板。\n' +
+      '\n' +
+      'action：\n' +
+      '  status   查当前守护状态（默认）\n' +
+      '  set      切换模式，用 mode 参数\n' +
+      '  connect  立刻尝试连一次（不管模式）\n' +
+      '  probe    只探测、不连接\n' +
+      '  interval 改探测间隔，用 interval_sec（5~600，默认 15）\n' +
+      '\n' +
+      'mode：\n' +
+      '  always  一直守护，掉线就重连（默认）\n' +
+      '  once    只运行一次 —— 连上一次后守护自动关闭\n' +
+      '  off     关闭守护（仍会探测并上报状态，但不重连）\n' +
+      '\n' +
+      '连接参数不用你填：被控端直接从 Prism 的 GET /api/config 里取\n' +
+      '（token / 服务器号 / 认证地址），再 POST /api/bot/connect。\n' +
+      '★ 需要被控端 v1.4 或更高。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['status', 'set', 'connect', 'probe', 'interval'],
+          description: '默认 status',
+        },
+        mode: {
+          type: 'string',
+          enum: ['off', 'once', 'always'],
+          description: 'action=set 时用',
+        },
+        interval_sec: { type: 'number', description: 'action=interval 时用，5~600' },
+        device_id: { type: 'string', description: '可选，指定设备' },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ------------------------------------------------------------
@@ -319,6 +363,20 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
       method: a.method || 'GET',
       body: a.body,
     });
+    return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }], isError: !r.ok };
+  }
+
+  if (name === 'bot_keeper') {
+    const action = (a.action || 'status').toString().toLowerCase();
+    const payload: Record<string, unknown> = { action };
+    if (action === 'set') {
+      if (!a.mode) throw new Error('action=set 时必须给 mode（off/once/always）');
+      payload.mode = a.mode;
+    }
+    if (action === 'interval') {
+      payload.interval_sec = a.interval_sec ?? 15;
+    }
+    const r = await runOnDevice(db, a.device_id, 'bot_keeper', payload);
     return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }], isError: !r.ok };
   }
 

@@ -29,6 +29,13 @@ import { listModels, createModel, updateModel, deleteModel, chatProxy } from './
 import { handleMcp } from './mcphttp';
 import { runOnDevice, pickDevice, streamCommandSSE } from './relay';
 
+/**
+ * 构建标记。改代码时顺手改一下这个值，
+ * 就能用 GET /api/v1/__build 确认线上跑的到底是哪一版 ——
+ * 排查「部署了但没生效」时省大量时间。
+ */
+const BUILD_TAG = '2026-09-13-botkeeper-v1.4';
+
 export interface Env {
   DB: D1Database;
   AI: Ai;
@@ -755,6 +762,11 @@ export default {
       return health(req, env);
     }
 
+    // 构建标记：用来确认线上跑的到底是哪一版（排查部署没生效时非常有用）
+    if (path === '/api/v1/__build') {
+      return ok({ build: BUILD_TAG, features: ['bot_keeper', 'prism_status', 'mcp_v1'] });
+    }
+
     // --------------------------------------------------------
     // ★ 被控端 API（云手机 App 调用，用设备 token 鉴权，不用管理密钥）
     //   所以这部分必须在 checkAuth 之前分流
@@ -906,6 +918,29 @@ export default {
         let b: any = {};
         try { b = await req.json(); } catch { /* GET 无体 */ }
         const r = await runOnDevice(env.DB, b.device_id, 'prism_status', {});
+        return ok(r);
+      }
+
+      // ------------------------------------------------------------
+      // 机器人连接守护（控制台「设备」页的开关）
+      //   POST /api/v1/bot/keeper  {action, mode, interval_sec, device_id}
+      //   Prism 的 AI帮写 自己不会重连，这层补上。
+      // ------------------------------------------------------------
+      if (path === '/api/v1/bot/keeper' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { /* 允许空体 */ }
+        const act = (b.action || 'status').toString().toLowerCase();
+        if (!['status', 'set', 'connect', 'probe', 'interval'].includes(act)) {
+          return fail('action 只支持 status/set/connect/probe/interval');
+        }
+        if (act === 'set' && !['off', 'once', 'always'].includes((b.mode || '').toString())) {
+          return fail('mode 只支持 off/once/always');
+        }
+        const r = await runOnDevice(env.DB, b.device_id, 'bot_keeper', {
+          action: act,
+          mode: b.mode,
+          interval_sec: b.interval_sec,
+        });
         return ok(r);
       }
 

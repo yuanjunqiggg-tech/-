@@ -62,6 +62,12 @@ public class AgentService extends Service {
         //   原生线程不受 WebView 生命周期影响。
         NativePoller.get(this).start();
 
+        // ★ 机器人连接守护：掉线自动重连（默认 always，可关 / 可只跑一次）。
+        //   Prism 的「AI帮写」自己不会重连 —— 机器人一掉线它就只能干等，
+        //   系统提示词里那句「机器人当前未连接，game_call 会返回错误」就是证据。
+        //   这层补上它。
+        BotKeeper.get(this).start();
+
         Log.i(TAG, "前台服务已启动");
     }
 
@@ -92,6 +98,7 @@ public class AgentService extends Service {
     public void onDestroy() {
         running = false;
         NativePoller.get(this).stop();
+        BotKeeper.get(this).stop();
         releaseWakeLock();
         Log.w(TAG, "前台服务被销毁");
 

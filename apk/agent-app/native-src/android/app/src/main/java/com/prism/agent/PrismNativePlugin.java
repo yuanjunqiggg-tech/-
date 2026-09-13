@@ -297,6 +297,47 @@ public class PrismNativePlugin extends Plugin {
         call.resolve(o);
     }
 
+    /**
+     * 机器人连接守护 —— 查状态 / 切模式 / 立即连一次。
+     *
+     * ★ 必须走后台线程：这里要发本机 HTTP（127.0.0.1:8080），
+     *   在主线程发会抛 NetworkOnMainThreadException。
+     */
+    @PluginMethod
+    public void botKeeper(final PluginCall call) {
+        final String action = call.getString("action", "status");
+        final String mode = call.getString("mode", "");
+        final Integer intervalSec = call.getInt("interval_sec", 15);
+        exe().execute(() -> {
+            try {
+                BotKeeper bk = BotKeeper.get(getContext());
+                org.json.JSONObject r;
+                switch (action == null ? "status" : action.toLowerCase()) {
+                    case "set":      r = bk.setMode(mode); break;
+                    case "connect":  r = bk.connectNow(); break;
+                    case "probe":    r = bk.probeNow(); break;
+                    case "interval": r = bk.setIntervalSec(intervalSec == null ? 15 : intervalSec); break;
+                    default:         r = bk.snapshot();
+                }
+                call.resolve(toJS(r));
+            } catch (Throwable t) {
+                call.reject("机器人守护操作失败：" + t.getMessage());
+            }
+        });
+    }
+
+    /** org.json.JSONObject → JSObject（Capacitor 只认 JSObject） */
+    private static JSObject toJS(org.json.JSONObject src) {
+        JSObject o = new JSObject();
+        if (src == null) return o;
+        java.util.Iterator<String> it = src.keys();
+        while (it.hasNext()) {
+            String k = it.next();
+            o.put(k, src.opt(k));
+        }
+        return o;
+    }
+
     @Override
     protected void handleOnDestroy() {
         if (prismExecutor != null && !prismExecutor.isShutdown()) {

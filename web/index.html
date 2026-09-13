@@ -249,6 +249,29 @@
         </div>
 
         <div class="card">
+          <h3>机器人连接守护</h3>
+          <p style="font-size:13px;color:var(--dim);margin:0 0 10px">
+            机器人掉线后，Prism 内置的 AI帮写 <b>不会自己重连</b> ——
+            它只会在提示词里写一句「机器人当前未连接，game_call 会返回错误」，
+            然后干等你去 Prism 界面点连接。结果是 AI 越用越哑。<br>
+            这里打开守护后，<b>掉线会自动连上</b>，连接参数直接从 Prism 配置里取，不用你再填。
+          </p>
+          <div id="bkModes" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <button class="tbtn" id="bkAlways" onclick="setBotKeeper('always')">一直守护（推荐）</button>
+            <button class="tbtn" id="bkOnce" onclick="setBotKeeper('once')">只运行一次</button>
+            <button class="tbtn" id="bkOff" onclick="setBotKeeper('off')">关闭</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="tbtn" onclick="botKeeper('status')">查状态</button>
+            <button class="tbtn" onclick="botKeeper('connect')">立即连一次</button>
+            <button class="tbtn" onclick="botKeeper('probe')">只探测</button>
+            <span id="bkState" style="font-size:13px;color:var(--dim)">未检查</span>
+          </div>
+          <pre id="bkOut" style="background:var(--bg);padding:10px;border-radius:8px;
+               font-size:12px;overflow-x:auto;color:var(--dim);margin:10px 0 0;display:none"></pre>
+        </div>
+
+        <div class="card">
           <h3>AI帮写 会话（存在 Prism 里）</h3>
           <p style="font-size:13px;color:var(--dim);margin:0 0 10px">
             这些会话存在 <b>Prism 自己的存储</b>里，不是网页的。
@@ -529,7 +552,7 @@ function switchView(name){
   if (name === 'prompts') loadPrompts();
   if (name === 'settings') loadTemplates();
   if (name === 'models') loadModels();
-  if (name === 'devices') { loadDevices(); refreshBindUrl(); }
+  if (name === 'devices') { loadDevices(); refreshBindUrl(); botKeeper('status'); }
   if (name === 'packets') { syncPacketDevice(); loadPackets(); }
   if (name === 'agent') { refreshMcpUrl(); mcpToolsCache = null; $('mcpTools').innerHTML = '<div class="empty">点上方「测试连接」后显示</div>'; }
 }
@@ -703,7 +726,8 @@ async function loadDevices(){
           esc(x.id) + ' · ' + esc(x.platform || '?') +
           ' · ' + (on ? '在线' : '离线 ' + Math.floor((now - (x.last_seen||0))/1000) + 's') +
           (x.prism_online ? ' · Prism✓' : '') +
-          (x.bot_connected ? ' · 机器人✓' : '') +
+          (x.bot_connected ? ' · 机器人✓' : ' · 机器人✗') +
+          ' · 守护:' + ({always:'一直', once:'一次', off:'关'}[x.bot_keeper_mode] || '一直') +
           (typeof x.battery === 'number' && x.battery >= 0 ? ' · ' + x.battery + '%' : '') +
         '</div>' +
       '</div>';
@@ -758,6 +782,78 @@ async function checkPrism(){
     out.style.display = 'block';
     out.textContent = e.message || String(e);
   }
+}
+
+// ============================================================
+// 机器人连接守护（控制台「设备」页的开关）
+// ============================================================
+//
+// 为什么要有它：Prism 内置的 AI帮写 不会自己重连机器人。
+// 机器人一掉线，它只会在系统提示词里写「机器人当前未连接，
+// game_call 工具会返回错误，不要依赖它」，然后干等用户手动连。
+// 这层补上 —— 掉线自动重连，默认一直守护。
+//
+//   always  一直守护（默认）
+//   once    只运行一次：连上一次后守护自动关闭
+//   off     关闭守护（仍会探测并上报状态，但不重连）
+// ============================================================
+async function botKeeper(action, extra){
+  var st = $('bkState'), out = $('bkOut');
+  if (st) st.textContent = '处理中…';
+  try {
+    var body = Object.assign({ action: action || 'status',
+                               device_id: S.deviceId || undefined }, extra || {});
+    var r = await api('/api/v1/bot/keeper', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    var d = r.data || r;
+    var res = d.result || {};
+    renderBotKeeper(res, d.device_name || d.device_id);
+    return res;
+  } catch(e){
+    if (st) st.innerHTML = '<span style="color:var(--err)">失败：' + (e.message || e) + '</span>';
+    if (out) { out.style.display = 'block'; out.textContent = String(e.message || e); }
+    return null;
+  }
+}
+
+function renderBotKeeper(res, devName){
+  var st = $('bkState'), out = $('bkOut');
+  if (!st) return;
+  var mode = res.mode || 'always';
+  var modeText = { always:'一直守护', once:'只运行一次', off:'已关闭' }[mode] || mode;
+  var dot = res.connected
+    ? '<span style="color:var(--ok)">● 机器人在线</span>'
+    : '<span style="color:var(--err)">● 机器人未连接</span>';
+  st.innerHTML = dot + ' · 守护模式：<b>' + modeText + '</b>'
+    + (res.server ? ' · 服务器 ' + res.server : '')
+    + (res.attempts ? ' · 已尝试连接 ' + res.attempts + ' 次' : '');
+  // 高亮当前模式按钮
+  [['bkAlways','always'],['bkOnce','once'],['bkOff','off']].forEach(function(p){
+    var el = $(p[0]); if (!el) return;
+    if (p[1] === mode) { el.classList.add('pri'); }
+    else { el.classList.remove('pri'); }
+  });
+  if (out){
+    out.style.display = 'block';
+    out.textContent = JSON.stringify({
+      设备: devName || S.deviceId || '(未选)',
+      守护模式: mode,
+      守护线程在跑: res.running,
+      机器人已连接: res.connected,
+      服务器: res.server, 维度: res.dimension, 是OP: res.is_op,
+      探测间隔秒: res.interval_sec,
+      累计连接尝试: res.attempts,
+      连续失败: res.fail_streak,
+      最近消息: res.message,
+    }, null, 2);
+  }
+}
+
+async function setBotKeeper(mode){
+  await botKeeper('set', { mode: mode });
 }
 
 async function loadAiSessions(recent){

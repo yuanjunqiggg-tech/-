@@ -196,7 +196,7 @@ export async function deviceHeartbeat(req: Request, env: DeviceEnv): Promise<Res
 
   await env.DB.prepare(
     `UPDATE devices SET last_seen=?, prism_online=?, bot_connected=?,
-       bot_server=?, battery=?, ip_hint=? WHERE id=?`,
+       bot_server=?, battery=?, ip_hint=?, bot_keeper_mode=?, app_ver=? WHERE id=?`,
   )
     .bind(
       now,
@@ -205,6 +205,11 @@ export async function deviceHeartbeat(req: Request, env: DeviceEnv): Promise<Res
       b.bot_server ?? chk.device.bot_server ?? '',
       typeof b.battery === 'number' ? b.battery : chk.device.battery,
       (req.headers.get('CF-Connecting-IP') || b.ip_hint || '').replace(/\.\d+$/, '.x'),
+      // ★ 机器人连接守护模式（off/once/always）由被控端上报，
+      //   控制台的开关读的就是这个值。老版本被控端不上报时保留原值。
+      b.bot_keeper_mode ?? chk.device.bot_keeper_mode ?? 'always',
+      // ★ APK 版本号：判断设备上装的是哪一版（v1.2/v1.3 行为不同，靠行为反推太费劲）
+      b.app_ver ?? chk.device.app_ver ?? '',
       chk.device.id,
     )
     .run();
@@ -426,7 +431,7 @@ export async function listDevices(req: Request, env: DeviceEnv, url: URL): Promi
   const rows = await env.DB.prepare(
     `SELECT id, name, platform, model, android_ver, app_ver, prism_port,
             prism_online, bot_connected, bot_server, battery, ip_hint, memo,
-            status, last_seen, created_at
+            bot_keeper_mode, status, last_seen, created_at
      FROM devices ORDER BY last_seen DESC LIMIT 200`,
   ).all<any>();
 
@@ -559,6 +564,9 @@ export async function pushCommand(req: Request, env: DeviceEnv, id: string): Pro
     'session_list', 'session_load', 'session_save', 'session_delete',
     // Prism 引擎状态自检（是否安装 / 8080 是否响应 / 机器人连接状态）
     'prism_status',
+    // ★ 机器人连接守护：掉线自动重连（off/once/always）
+    //   Prism 的 AI帮写 自己不会重连，这是被控端补上的能力
+    'bot_keeper',
   ];
   if (!allowed.includes(kind)) {
     return jfail(`不支持的指令类型：${kind}（可用：${allowed.join(', ')}）`);

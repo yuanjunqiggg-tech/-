@@ -6,7 +6,7 @@
 # 子域名：api.youyuanqi.dpdns.org
 # ============================================================
 
-name = "ds-platform-ai-assist"
+name = "ds-ai-assist-v2"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]

@@ -99,4 +99,48 @@ public final class AgentPrefs {
     public static void clearCredentials(Context ctx) {
         sp(ctx).edit().remove(K_DEV_ID).remove(K_TOKEN).apply();
     }
+
+    // ============================================================
+    // 机器人连接守护（BotKeeper）
+    // ============================================================
+    //
+    // 用户要求：AI 如果没进服务器就自动连上；默认一直自动连接；
+    // 给一个开关，可以关掉，也可以只跑一次。
+    //
+    //   off    关闭守护（完全不碰机器人连接）
+    //   once   只跑一次：连上一次就自动切回 off
+    //   always 一直守护（默认）：掉线就重连
+    private static final String K_BOT_KEEPER_MODE = "bot_keeper_mode";
+    private static final String K_BOT_KEEPER_INTERVAL = "bot_keeper_interval_sec";
+
+    public static final String BOT_KEEPER_OFF = "off";
+    public static final String BOT_KEEPER_ONCE = "once";
+    public static final String BOT_KEEPER_ALWAYS = "always";
+
+    /** 守护模式，默认 always（用户明确要求的默认值） */
+    public static String botKeeperMode(Context ctx) {
+        String m = sp(ctx).getString(K_BOT_KEEPER_MODE, BOT_KEEPER_ALWAYS);
+        if (m == null) return BOT_KEEPER_ALWAYS;
+        m = m.trim().toLowerCase();
+        if (!BOT_KEEPER_OFF.equals(m) && !BOT_KEEPER_ONCE.equals(m) && !BOT_KEEPER_ALWAYS.equals(m)) {
+            return BOT_KEEPER_ALWAYS;
+        }
+        return m;
+    }
+
+    public static void setBotKeeperMode(Context ctx, String mode) {
+        sp(ctx).edit().putString(K_BOT_KEEPER_MODE, mode).apply();
+    }
+
+    /** 探测间隔（秒），默认 15，夹在 5~600 之间 */
+    public static int botKeeperIntervalSec(Context ctx) {
+        int v = sp(ctx).getInt(K_BOT_KEEPER_INTERVAL, 15);
+        if (v < 5) v = 5;
+        if (v > 600) v = 600;
+        return v;
+    }
+
+    public static void setBotKeeperIntervalSec(Context ctx, int sec) {
+        sp(ctx).edit().putInt(K_BOT_KEEPER_INTERVAL, sec).apply();
+    }
 }

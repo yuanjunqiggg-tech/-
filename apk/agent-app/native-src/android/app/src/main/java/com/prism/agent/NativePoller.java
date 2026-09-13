@@ -145,6 +145,22 @@ public final class NativePoller {
             JSONObject body = new JSONObject();
             body.put("prism_online", PrismBridge.alive(AgentPrefs.prismPort(appCtx), 1500));
             body.put("battery", -1);
+            // ★ 上报真实机器人状态。之前只报 prism_online，
+            //   所以控制台「机器人」一栏永远是未连接 —— 没人告诉它。
+            //   数据来自 BotKeeper 的缓存，不额外发请求。
+            BotKeeper bk = BotKeeper.get(appCtx);
+            body.put("bot_connected", bk.isConnected());
+            if (!bk.serverCode().isEmpty()) body.put("bot_server", bk.serverCode());
+            body.put("bot_keeper_mode", AgentPrefs.botKeeperMode(appCtx));
+            // ★ 上报真实 APK 版本号。
+            //   之前只能靠「行为」反推设备上装的是哪版（v1.2/v1.3 的
+            //   prism_rest 行为不同），非常费劲。现在直接报。
+            try {
+                body.put("app_ver", appCtx.getPackageManager()
+                        .getPackageInfo(appCtx.getPackageName(), 0).versionName);
+            } catch (Throwable ignored) {
+                // 拿不到就算了，不影响心跳
+            }
             post("/api/v1/device/heartbeat", body);
         } catch (Throwable t) {
             Log.w(TAG, "心跳失败：" + t.getMessage());
@@ -243,6 +259,30 @@ public final class NativePoller {
                                         .put("type", payload.optString("packet_type"))
                                         .put("data", payload.optJSONObject("data"))));
                         break;
+
+                    // ★ 机器人连接守护：查状态 / 切模式 / 立即连一次
+                    //   action: status(默认) | set | connect | probe | interval
+                    case "bot_keeper": {
+                        BotKeeper bk = BotKeeper.get(appCtx);
+                        String action = payload.optString("action", "status").toLowerCase();
+                        switch (action) {
+                            case "set":
+                                result = bk.setMode(payload.optString("mode", ""));
+                                break;
+                            case "connect":
+                                result = bk.connectNow();
+                                break;
+                            case "probe":
+                                result = bk.probeNow();
+                                break;
+                            case "interval":
+                                result = bk.setIntervalSec(payload.optInt("interval_sec", 15));
+                                break;
+                            default:
+                                result = bk.snapshot();
+                        }
+                        break;
+                    }
                     default:
                         error = "未知指令类型：" + kind;
                 }

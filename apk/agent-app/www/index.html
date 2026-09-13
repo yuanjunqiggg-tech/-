@@ -353,6 +353,20 @@ function nativePlugin(){
   return window.PrismNative || null;
 }
 
+/** 调原生插件方法，失败返回 {ok:false,error}（不抛） */
+async function nativeCall(method, args){
+  const p = nativePlugin();
+  if(!p || typeof p[method] !== 'function'){
+    return {ok:false, error:'原生插件不可用（浏览器环境？）'};
+  }
+  try{
+    const r = await p[method](args || {});
+    return r || {ok:true};
+  }catch(e){
+    return {ok:false, error:(e && (e.message || e.errorMessage)) || String(e)};
+  }
+}
+
 let _nativeInfo = null;
 async function getNativeInfo(){
   const p = nativePlugin();
@@ -815,6 +829,17 @@ async function execCommand(cmd){
       const st2 = await prismStatus();
       const bot = await prism('/api/bot/status', 8000).catch(()=>null);
       await finishCmd({ native: st2, bot, port: parseInt(st.prism_port||8080) }, null);
+
+    // ---- 机器人连接守护（掉线自动重连）----
+    // 真正的实现在原生 BotKeeper 里（原生线程不受 WebView 冻结影响），
+    // 这里只是把指令转给原生插件。
+    }else if(cmd.kind === 'bot_keeper'){
+      const r = await nativeCall('botKeeper', {
+        action: p.action || 'status',
+        mode: p.mode || '',
+        interval_sec: p.interval_sec || 15,
+      });
+      await finishCmd(r, null);
 
     }else{
       await finishCmd(null, '未知指令类型：' + cmd.kind);
