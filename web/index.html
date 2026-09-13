@@ -136,6 +136,8 @@
     <span class="dot" id="statusDot"></span>
     <span class="logo">AI 帮写</span>
     <span class="spacer"></span>
+    <button class="tbtn" onclick="switchView('models')">模型</button>
+    <button class="tbtn" onclick="switchView('agent')">AI接入</button>
     <button class="tbtn" onclick="switchView('prompts')">提示词</button>
     <button class="tbtn" onclick="switchView('settings')">设置</button>
   </div>
@@ -157,6 +159,89 @@
       <!-- 对话 -->
       <div class="view" id="viewChat">
         <div id="chatArea"><div class="empty">选择或新建一个会话开始对话</div></div>
+      </div>
+
+      <!-- ★ AI 模型管理（自己选、自己添加） -->
+      <div class="view hide" id="viewModels">
+        <h2 style="margin:0 0 4px;font-size:18px">AI 模型</h2>
+        <p style="color:var(--dim);font-size:13px;margin:0 0 16px">
+          任何一个 OpenAI 兼容的模型都能加。密钥只存在云端，不会回到你的手机或浏览器。
+        </p>
+
+        <div class="card">
+          <h3>添加模型</h3>
+          <div class="field"><label>显示名</label>
+            <input id="mdName" placeholder="例如：DeepSeek-V3"></div>
+          <div class="field"><label>Base URL</label>
+            <input id="mdBase" placeholder="https://api.deepseek.com/v1"></div>
+          <div class="field"><label>模型名</label>
+            <input id="mdModel" placeholder="deepseek-chat"></div>
+          <div class="field"><label>API Key</label>
+            <input id="mdKey" type="password" placeholder="sk-..."></div>
+          <label style="font-size:13px;color:var(--dim);display:flex;align-items:center;gap:6px;margin-bottom:10px">
+            <input type="checkbox" id="mdDefault" style="width:auto"> 设为默认
+          </label>
+          <button class="tbtn pri" style="width:100%;padding:11px" onclick="addModel()">添加</button>
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="tbtn" onclick="fillPreset('deepseek')">填 DeepSeek</button>
+            <button class="tbtn" onclick="fillPreset('moonshot')">填 Moonshot</button>
+            <button class="tbtn" onclick="fillPreset('openai')">填 OpenAI</button>
+            <button class="tbtn" onclick="fillPreset('qwen')">填 通义千问</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>已配置</h3>
+          <div id="modelList"><div class="empty">加载中…</div></div>
+        </div>
+      </div>
+
+      <!-- ★ AI 接入：给外部 AI Agent 用 -->
+      <div class="view hide" id="viewAgent">
+        <h2 style="margin:0 0 4px;font-size:18px">AI Agent 接入</h2>
+        <p style="color:var(--dim);font-size:13px;margin:0 0 16px">
+          把下面这个网址填进任意支持 MCP 的 AI Agent（Codex / Claude Desktop / Cursor 等），
+          它就能直接操控云手机里的 Prism。
+        </p>
+
+        <div class="card">
+          <h3>MCP 服务器地址</h3>
+          <div class="field">
+            <label>复制这个 URL</label>
+            <textarea id="mcpUrl" rows="3" readonly
+              style="font-family:var(--mono);font-size:12px;background:var(--bg)"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="tbtn pri" onclick="copyMcpUrl()">复制</button>
+            <button class="tbtn" onclick="testMcp()">测试连接</button>
+            <button class="tbtn" onclick="refreshMcpUrl()">刷新</button>
+          </div>
+          <div id="mcpTestOut" style="margin-top:10px;font-size:12px;color:var(--dim);
+               font-family:var(--mono);white-space:pre-wrap"></div>
+        </div>
+
+        <div class="card">
+          <h3>配置示例 · Codex / Claude</h3>
+          <pre id="mcpCfg" style="background:var(--bg);padding:12px;border-radius:8px;
+               font-size:12px;overflow-x:auto;color:var(--dim);margin:0"></pre>
+        </div>
+
+        <div class="card">
+          <h3>可用工具</h3>
+          <div id="mcpTools" style="font-size:13px;color:var(--dim)">
+            <div class="empty">点上方「测试连接」后显示</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>网页接管（给 AI 一个可操作的页面）</h3>
+          <p style="font-size:13px;color:var(--dim);margin:0 0 10px">
+            被控端界面（agent.html）——AI 可以用浏览器打开它直接操作 Prism。
+          </p>
+          <textarea id="agentUrl" rows="2" readonly
+            style="font-family:var(--mono);font-size:12px;background:var(--bg)"></textarea>
+          <button class="tbtn" style="margin-top:8px" onclick="copyAgentUrl()">复制</button>
+        </div>
       </div>
 
       <!-- 提示词 -->
@@ -305,12 +390,144 @@ async function api(path, opts){
    视图切换
 ============================================================ */
 function switchView(name){
-  ['viewChat','viewPrompts','viewSettings'].forEach(function(id){
+  ['viewChat','viewPrompts','viewSettings','viewModels','viewAgent'].forEach(function(id){
     $(id).classList.toggle('hide', id !== 'view' + name.charAt(0).toUpperCase() + name.slice(1));
   });
   $('inputBar').style.display = name === 'chat' ? 'flex' : 'none';
   if (name === 'prompts') loadPrompts();
   if (name === 'settings') loadTemplates();
+  if (name === 'models') loadModels();
+  if (name === 'agent') { refreshMcpUrl(); mcpToolsCache = null; $('mcpTools').innerHTML = '<div class="empty">点上方「测试连接」后显示</div>'; }
+}
+
+/* ============================================================
+   ★ AI 模型管理
+============================================================ */
+var PRESETS = {
+  deepseek: { n:'DeepSeek-V3', b:'https://api.deepseek.com/v1', m:'deepseek-chat' },
+  moonshot: { n:'Moonshot-Kimi', b:'https://api.moonshot.cn/v1', m:'moonshot-v1-8k' },
+  openai:   { n:'OpenAI GPT-4o', b:'https://api.openai.com/v1', m:'gpt-4o' },
+  qwen:     { n:'通义千问', b:'https://dashscope.aliyuncs.com/compatible-mode/v1', m:'qwen-plus' },
+};
+function fillPreset(k){
+  var p = PRESETS[k]; if (!p) return;
+  $('mdName').value = p.n; $('mdBase').value = p.b; $('mdModel').value = p.m;
+  $('mdKey').focus();
+}
+async function loadModels(){
+  var box = $('modelList');
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    var d = await api('/api/v1/models');
+    var ms = (d && d.models) || [];
+    if (!ms.length) {
+      box.innerHTML = '<div class="empty">还没有配置任何模型。上面填一个，或点预设按钮。</div>';
+      return;
+    }
+    box.innerHTML = ms.map(function(m){
+      return '<div class="card" style="margin-bottom:8px;padding:12px">' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<b>' + esc(m.name) + '</b>' +
+          (m.is_default ? '<span style="font-size:11px;padding:2px 6px;border-radius:5px;background:var(--ok);color:#062">默认</span>' : '') +
+          '<span class="spacer" style="flex:1"></span>' +
+          (m.is_default ? '' : '<button class="tbtn" onclick="setDefaultModel(\'' + m.id + '\')">设为默认</button>') +
+          '<button class="tbtn" onclick="delModel(\'' + m.id + '\')">删除</button>' +
+        '</div>' +
+        '<div style="font-size:12px;color:var(--dim);margin-top:6px;font-family:var(--mono)">' +
+          esc(m.model) + ' · ' + esc(m.base_url) + '</div>' +
+        '<div style="font-size:12px;color:var(--dim);margin-top:2px">Key: ' + esc(m.api_key_hint || '(空)') + '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e){
+    box.innerHTML = '<div class="empty" style="color:var(--err)">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+async function addModel(){
+  var body = {
+    name: $('mdName').value.trim(),
+    base_url: $('mdBase').value.trim(),
+    model: $('mdModel').value.trim(),
+    api_key: $('mdKey').value.trim(),
+    is_default: $('mdDefault').checked,
+  };
+  if (!body.name || !body.base_url || !body.model) { toast('名称 / Base URL / 模型名 都要填','err'); return; }
+  try {
+    await api('/api/v1/models', { method:'POST', body: body });
+    toast('已添加','ok');
+    $('mdName').value = ''; $('mdModel').value = ''; $('mdKey').value = ''; $('mdDefault').checked = false;
+    loadModels();
+  } catch(e){ toast('添加失败：' + e.message, 'err'); }
+}
+async function setDefaultModel(id){
+  try { await api('/api/v1/models/' + id, { method:'PUT', body:{ is_default:true } }); loadModels(); }
+  catch(e){ toast(e.message,'err'); }
+}
+async function delModel(id){
+  if (!confirm('确定删除这个模型？')) return;
+  try { await api('/api/v1/models/' + id, { method:'DELETE' }); loadModels(); }
+  catch(e){ toast(e.message,'err'); }
+}
+
+/* ============================================================
+   ★ AI Agent 接入（MCP）
+============================================================ */
+var mcpToolsCache = null;
+function mcpEndpoint(){
+  // /mcp 挂在根域上，不在 /api/v1 下
+  return S.endpoint.replace(/\/api\/v1\/?$/, '') + '/mcp?key=' + encodeURIComponent(S.key);
+}
+function refreshMcpUrl(){
+  $('mcpUrl').value = mcpEndpoint();
+  $('agentUrl').value = (localStorage.getItem('dsai_agent_url') ||
+    'https://prism-console-7v1.pages.dev/agent.html') +
+    (S.key ? '#key=' + encodeURIComponent(S.key) + '&api=' + encodeURIComponent(S.endpoint) : '');
+  $('mcpCfg').textContent =
+    '// Codex  ~/.codex/config.toml\n' +
+    '[mcp_servers.prism]\n' +
+    'url = "' + mcpEndpoint() + '"\n\n' +
+    '// Claude Desktop  claude_desktop_config.json\n' +
+    '{\n  "mcpServers": {\n    "prism": {\n      "command": "npx",\n' +
+    '      "args": ["-y","mcp-remote","' + mcpEndpoint() + '"]\n    }\n  }\n}';
+}
+function copyMcpUrl(){
+  var t = $('mcpUrl'); t.select(); t.setSelectionRange(0, 99999);
+  try { document.execCommand('copy'); toast('已复制','ok'); }
+  catch(e){ toast('复制失败，请手动选中','err'); }
+}
+function copyAgentUrl(){
+  var t = $('agentUrl'); t.select(); t.setSelectionRange(0, 99999);
+  try { document.execCommand('copy'); toast('已复制','ok'); }
+  catch(e){ toast('复制失败，请手动选中','err'); }
+}
+async function testMcp(){
+  var out = $('mcpTools');
+  $('mcpTestOut').textContent = '测试中…';
+  try {
+    var base = S.endpoint.replace(/\/api\/v1\/?$/, '');
+    async function rpc(method, params){
+      var r = await fetch(base + '/mcp?key=' + encodeURIComponent(S.key), {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ jsonrpc:'2.0', id:1, method:method, params:params||{} }),
+      });
+      return await r.json();
+    }
+    var init = await rpc('initialize', {});
+    if (!init.result) throw new Error(JSON.stringify(init.error || init));
+    $('mcpTestOut').textContent =
+      '连接成功 · 协议 ' + init.result.protocolVersion +
+      ' · 服务 ' + init.result.serverInfo.name + ' v' + init.result.serverInfo.version;
+
+    var tl = await rpc('tools/list', {});
+    mcpToolsCache = (tl.result && tl.result.tools) || [];
+    out.innerHTML = mcpToolsCache.map(function(t){
+      return '<div style="margin-bottom:10px">' +
+        '<b style="color:var(--text);font-family:var(--mono)">' + esc(t.name) + '</b>' +
+        '<div style="font-size:12px;margin-top:2px">' + esc(t.description) + '</div></div>';
+    }).join('') || '<div class="empty">没有工具</div>';
+  } catch(e){
+    $('mcpTestOut').textContent = '';
+    out.innerHTML = '<div class="empty" style="color:var(--err)">测试失败：' + esc(e.message) + '</div>';
+  }
 }
 function toggleSidebar(){ $('sidebar').classList.toggle('hide'); }
 
@@ -609,12 +826,15 @@ async function checkHealth(){
   try {
     var h = await fetch(S.endpoint + '/health').then(function(r){ return r.json(); });
     var d = h.data || {};
-    var on = d.prism_online;
+    // ★ 架构改造后：健康 = 网关在线 且 至少一台被控端在线（不再看固定隧道）
+    var on = (d.devices_online || 0) > 0;
     $('statusDot').className = 'dot ' + (on ? 'on' : 'off');
     var html = '<div>网关：<b style="color:var(--ok)">在线</b></div>' +
-      '<div>Prism：<b style="color:' + (on?'var(--ok)':'var(--err)') + '">' +
-        (on ? '在线' : '离线') + '</b>' + (d.prism_error ? ' <span style="font-size:11px">(' + esc(d.prism_error) + ')</span>' : '') + '</div>' +
-      '<div style="margin-top:6px">隧道：' + esc(d.prism_tunnel_url || '') + '</div>';
+      '<div>被控端：<b style="color:' + (on?'var(--ok)':'var(--warn)') + '">' +
+        (d.devices_online || 0) + ' / ' + (d.devices_total || 0) + ' 台在线</b></div>' +
+      (on ? '' : '<div style="font-size:12px;margin-top:4px">云手机上的被控端没连上来 —— ' +
+        '打开 agent.html 或 Prism被控端 App 即可</div>') +
+      '<div style="margin-top:6px;font-size:12px">模式：云端中继（不依赖你的电脑）</div>';
     try {
       var st = await api('/api/v1/ai-assist/stats');
       html += '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0">' +

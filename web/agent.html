@@ -918,6 +918,21 @@ async function startAgentService(){
     await refreshStatus();
     startLoop();
   }else{
+    // ★ 网页接管：URL 里带 #key=...&api=...&name=... 时自动填好，
+    //   AI Agent 只要打开这个链接就能直接点「绑定设备」，不用手工抄密钥
+    try{
+      const hs = new URLSearchParams((location.hash||'').replace(/^#/,''));
+      const u  = new URLSearchParams(location.search||'');
+      const pick = (k)=> hs.get(k) || u.get(k);
+      const qKey = pick('key'), qApi = pick('api') || pick('endpoint');
+      const qName = pick('name'), qPort = pick('port');
+      if(qKey)  st.key = st.key || qKey;
+      if(qApi)  st.gateway = st.gateway || qApi;
+      if(qName) st.device_name = st.device_name || qName;
+      if(qPort) st.prism_port = st.prism_port || parseInt(qPort,10);
+      if(qKey || qApi) save();
+    }catch(e){ /* 解析失败就算了 */ }
+
     // 回填已保存的设置
     if(st.gateway) document.getElementById('gw').value = st.gateway;
     if(st.key) document.getElementById('key').value = st.key;

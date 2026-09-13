@@ -25,12 +25,17 @@ import {
   pushCommand, getCommand, deviceStream, devicePackets,
   deviceSessions, deviceOverview,
 } from './devices';
+import { listModels, createModel, updateModel, deleteModel, chatProxy } from './models';
+import { handleMcp } from './mcphttp';
+import { runOnDevice, pickDevice, streamCommandSSE } from './relay';
 
 export interface Env {
   DB: D1Database;
   AI: Ai;
   API_PREFIX: string;
-  PRISM_TUNNEL_URL: string;
+  /** @deprecated 2026-09-13 架构纠正：Prism 跑在云手机里，网关不再直连任何固定机器。
+   *  仅保留兼容旧配置，新代码一律走 ./relay.ts 的设备中继。 */
+  PRISM_TUNNEL_URL?: string;
   PLATFORM_ACCESS_KEY: string;
 }
 
@@ -82,9 +87,24 @@ function extractSystemPrompt(messages: any[]): string | null {
 
 /** 校验访问密钥 */
 function checkAuth(req: Request, env: Env): boolean {
+  return tokenFromRequest(req) === env.PLATFORM_ACCESS_KEY;
+}
+
+/**
+ * 取密钥：优先 Authorization 头，其次 ?key= 查询参数。
+ *
+ * ★ 为什么必须支持 query：很多 MCP 客户端（以及网页接入）只允许你填一个 URL，
+ *   没法自定义请求头。不支持 query 的话用户根本配不进去。
+ */
+function tokenFromRequest(req: Request): string {
   const auth = req.headers.get('Authorization') || '';
-  const token = auth.replace(/^Bearer\s+/i, '').trim();
-  return token.length > 0 && token === env.PLATFORM_ACCESS_KEY;
+  const hdr = auth.replace(/^Bearer\s+/i, '').trim();
+  if (hdr) return hdr;
+  try {
+    return new URL(req.url).searchParams.get('key') || '';
+  } catch {
+    return '';
+  }
 }
 
 // ------------------------------------------------------------
@@ -277,91 +297,32 @@ async function handleChat(req: Request, env: Env): Promise<Response> {
     }
   }
 
-  // 构造转发给 Prism 的请求
-  const upstreamBody = { ...body, messages: workingMessages };
-  const targetUrl = `${env.PRISM_TUNNEL_URL}/api/ai/chat`;
+  // ★ 2026-09-13 架构纠正：Prism 跑在云手机里，网关不再直连任何固定机器。
+  //   这里把请求下发给被控端，被控端在云手机内 127.0.0.1:8080 调 Prism，
+  //   再把流式事件回传；网关边轮询边转成 SSE 给控制台。
+  const deviceId = body.device_id || undefined;
 
-  let upstream: Response;
-  try {
-    upstream = await fetch(targetUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // 透传 Prism 需要的头（如有）
-        ...(req.headers.get('X-Prism-Password')
-          ? { 'X-Prism-Password': req.headers.get('X-Prism-Password')! }
-          : {}),
-      },
-      body: JSON.stringify(upstreamBody),
-    });
-  } catch (e: any) {
-    return fail(`无法连接 Prism 本地服务：${e?.message || e}`, 502);
-  }
+  const payload = {
+    model_name: modelName,
+    plugin_id: pluginId,
+    mode: body.mode || '',
+    session_name: sessionId,
+    messages: workingMessages,
+  };
 
-  if (!upstream.ok || !upstream.body) {
-    const txt = await upstream.text().catch(() => '');
-    return new Response(txt || 'Prism 返回错误', { status: upstream.status });
-  }
+  // 旁路入库（提示词捕获），不阻塞响应
+  //   注意：这里只能捕获「发出去的」；被控端回传的 AI 全文由 device_events 承载
+  captureMessages(env, {
+    sessionId,
+    pluginId,
+    modelName,
+    messages: workingMessages,
+    templateId: template?.id,
+  }).catch(() => {});
 
-  // ★ 用 TransformStream 逐块透传，并在结束时旁路入库
-  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
-  const writer = writable.getWriter();
-  const reader = upstream.body.getReader();
-  const decoder = new TextDecoder();
-
-  let collected = '';
-  let usage = { input: 0, output: 0 };
-
-  (async () => {
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        // 原样透传给客户端
-        await writer.write(value);
-
-        // 旁路解析用于统计（不阻塞）
-        collected += decoder.decode(value, { stream: true });
-      }
-    } catch (e) {
-      console.error('stream relay error:', e);
-    } finally {
-      // 解析 usage（ai_usage 事件）
-      for (const block of collected.split('\n\n')) {
-        if (!block.includes('ai_usage')) continue;
-        const m = block.match(/data:\s*(\{.*\})/);
-        if (!m) continue;
-        try {
-          const d = JSON.parse(m[1]);
-          if (d.input) usage.input = Math.max(usage.input, d.input);
-          if (d.output) usage.output = Math.max(usage.output, d.output);
-        } catch { /* ignore */ }
-      }
-
-      // ★ 旁路写库
-      await captureMessages(env, {
-        sessionId,
-        pluginId,
-        modelName,
-        messages: workingMessages,
-        usage,
-        templateId: template?.id,
-      });
-
-      await writer.close().catch(() => {});
-    }
-  })();
-
-  return new Response(readable, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-    },
-  });
+  return streamCommandSSE(env.DB, deviceId, payload);
 }
+
 
 // ------------------------------------------------------------
 // 管理接口
@@ -596,98 +557,75 @@ function parseToolFromSSE(sse: string): {
   };
 }
 
-/** 驱动 Prism 的 AI 调用一个工具，返回真实执行结果 */
+/**
+ * 驱动云手机里 Prism 的 AI 调用一个工具。
+ *
+ * ★ 走设备中继，不再直连任何固定机器的隧道。
+ *   被控端收到 kind=tool 后会用「系统提示词强制 tool_calls」的方式让 Prism
+ *   的内置 AI 去调这个工具，并把 ai_tool_done 的 result 回传。
+ */
 async function driveTool(
   env: Env,
   toolName: string,
   toolArgs: Record<string, unknown>,
-  sessionName?: string,
+  opts: { deviceId?: string; sessionName?: string; timeoutMs?: number } = {},
 ): Promise<Response> {
-  const body = {
-    model_name: 'prism自动',
-    plugin_id: '',
-    mode: '',
-    session_name: sessionName || `mcp-${Date.now()}`,
-    messages: [
-      {
-        role: 'system',
-        content:
-          '你是工具执行器。用户会指定一个工具名和参数，' +
-          '你必须立即发起该工具的 tool_calls，不要解释、不要闲聊、不要修改参数。' +
-          '只调用这一个工具，然后简短说明结果。',
-      },
-      {
-        role: 'user',
-        content:
-          `请立即调用工具 \`${toolName}\`，参数如下（JSON）：\n` +
-          `${JSON.stringify(toolArgs, null, 2)}\n\n只调用这一个工具。`,
-      },
-    ],
-  };
+  const r = await runOnDevice(
+    env.DB,
+    opts.deviceId,
+    'tool',
+    { tool_name: toolName, arguments: toolArgs || {} },
+    { timeoutMs: opts.timeoutMs ?? 45_000, sessionId: opts.sessionName },
+  );
 
-  const target = `${env.PRISM_TUNNEL_URL}/api/ai/chat`;
-  let upstream: Response;
-  try {
-    upstream = await fetch(target, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  } catch (e: any) {
-    return fail(`无法连接 Prism 隧道：${e?.message || e}`, 502);
+  if (r.timeout) {
+    return json({ ok: false, pending: true, command_id: r.command_id, error: r.error }, 504);
+  }
+  if (!r.ok) {
+    return json({ ok: false, error: r.error || '被控端执行失败', command_id: r.command_id });
   }
 
-  if (!upstream.ok) {
-    return fail(`Prism 返回 HTTP ${upstream.status}`, 502);
-  }
-
-  // 这里必须读完整个 SSE 才能拿到工具结果（MCP 是请求-响应模型）
-  const sse = await upstream.text();
-  const r = parseToolFromSSE(sse);
-
-  if (!r.found) {
-    return json({
-      ok: false,
-      error: r.error || `AI 未调用工具 ${toolName}（可能机器人未连接）`,
-      ai_comment: r.ai_text,
-    });
-  }
-
+  // 被控端回传的信封是 { ok, tool, executed, result, ai_comment }
+  //   ★ 不要只取 res.result 就把 tool / executed 丢了 —— 外层调用方要靠它们判断成败
+  const res = r.result || {};
   return json({
-    ok: !r.is_error,
-    tool: r.tool,
-    executed: r.executed,
-    result: r.result,
-    ai_comment: r.ai_text,
+    ok: res.ok !== undefined ? !!res.ok && !res.is_error : true,
+    tool: res.tool || toolName,
+    executed: res.executed !== false,
+    result: res.result !== undefined ? res.result : res,
+    ai_comment: res.ai_comment || null,
+    device_id: r.device_id,
+    device_name: r.device_name,
+    command_id: r.command_id,
   });
 }
 
-/** 直连 Prism 的一个 REST 端点（状态/模型/插件等） */
+/**
+ * 直连云手机里 Prism 的一个 REST 端点（状态/模型/插件等）。
+ * 同样走设备中继（kind=prism_rest）。
+ */
 async function prismPassthrough(
   env: Env,
   subPath: string,
   method = 'GET',
   body?: unknown,
+  deviceId?: string,
 ): Promise<Response> {
-  const target = `${env.PRISM_TUNNEL_URL}${subPath}`;
-  try {
-    const r = await fetch(target, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await r.text();
-    return new Response(text, {
-      status: r.status,
-      headers: {
-        'Content-Type': r.headers.get('Content-Type') || 'application/json; charset=utf-8',
-        'Access-Control-Allow-Origin': '*',
-      },
-    });
-  } catch (e: any) {
-    return fail(`Prism 不可达：${e?.message || e}`, 502);
+  const r = await runOnDevice(env.DB, deviceId, 'prism_rest', {
+    path: subPath,
+    method,
+    body,
+  });
+
+  if (r.timeout) {
+    return json({ ok: false, pending: true, command_id: r.command_id, error: r.error }, 504);
   }
+  if (!r.ok) {
+    return json({ ok: false, error: r.error || 'Prism 不可达', command_id: r.command_id }, 502);
+  }
+  return json({ ok: true, device_id: r.device_id, data: r.result });
 }
+
 
 /** MCP 工具目录（供客户端发现） */
 function mcpToolCatalog(): Response {
@@ -751,23 +689,41 @@ async function packetSubscribe(req: Request, env: Env): Promise<Response> {
   });
 }
 
-/** 健康检查 */
+/**
+ * 健康检查
+ * ★ 不再探测任何固定隧道，改为汇报「云端被控端」的在线情况。
+ */
 async function health(req: Request, env: Env): Promise<Response> {
-  const targetUrl = `${env.PRISM_TUNNEL_URL}/api/config`;
-  let prismOnline = false;
-  let prismError = '';
+  let devices: any[] = [];
+  let online = 0;
   try {
-    const r = await fetch(targetUrl, { method: 'GET' });
-    prismOnline = r.ok;
-    if (!r.ok) prismError = `HTTP ${r.status}`;
+    const r = await env.DB.prepare(
+      'SELECT id, name, platform, status, last_seen FROM devices ORDER BY last_seen DESC LIMIT 50',
+    ).all<any>();
+    const now = Date.now();
+    devices = (r.results || []).map((d: any) => {
+      const on = d.status === 1 && now - (d.last_seen || 0) < 90_000;
+      if (on) online++;
+      return {
+        id: d.id,
+        name: d.name,
+        platform: d.platform,
+        online: on,
+        last_seen_ago_sec: Math.floor((now - (d.last_seen || 0)) / 1000),
+      };
+    });
   } catch (e: any) {
-    prismError = e?.message || String(e);
+    /* 表还没建时不要 500 */
   }
+
   return ok({
     gateway: 'online',
-    prism_tunnel_url: env.PRISM_TUNNEL_URL,
-    prism_online: prismOnline,
-    prism_error: prismError,
+    mode: 'cloud-relay',
+    note: 'Prism 跑在云手机内，被控端主动外连本网关；不依赖任何固定机器的隧道',
+    devices_online: online,
+    devices_total: devices.length,
+    devices: devices.slice(0, 20),
+    mcp_endpoint: '/mcp',
     time: new Date().toISOString(),
   });
 }
@@ -814,6 +770,18 @@ export default {
     }
     if (path === '/api/v1/device/report' && req.method === 'POST') {
       return deviceReport(req, env);
+    }
+
+    // --------------------------------------------------------
+    // ★ MCP over HTTP —— 外部 AI Agent 的接入端点
+    //   支持 ?key= 传鉴权（客户端只能填 URL 的场景），所以单独鉴权
+    //   地址：https://ai-api.youyuanqi.dpdns.org/mcp?key=<平台密钥>
+    // --------------------------------------------------------
+    if (path === '/mcp' || path === '/api/v1/mcp' || path === '/api/v1/mcp/rpc') {
+      if (!checkAuth(req, env)) {
+        return fail('未授权：MCP 端点需要 ?key=<平台密钥> 或 Authorization: Bearer <密钥>', 401);
+      }
+      return handleMcp(req, env);
     }
 
     // 其余全部要求鉴权
@@ -895,6 +863,35 @@ export default {
       }
 
       // --------------------------------------------------------
+      // ★ AI 模型管理（用户自己选、自己添加）
+      // --------------------------------------------------------
+      if (path === '/api/v1/models' && req.method === 'GET') {
+        return listModels(env.DB);
+      }
+      if (path === '/api/v1/models' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+        return createModel(env.DB, b);
+      }
+      const mMatch = path.match(/^\/api\/v1\/models\/([^/]+)$/);
+      if (mMatch) {
+        const mid = decodeURIComponent(mMatch[1]);
+        if (req.method === 'PUT' || req.method === 'PATCH') {
+          let b: any = {};
+          try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+          return updateModel(env.DB, mid, b);
+        }
+        if (req.method === 'DELETE') return deleteModel(env.DB, mid);
+      }
+
+      // ★ 用控制台配置的模型聊天（密钥只在云端，不落客户端）
+      if (path === '/api/v1/chat' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+        return chatProxy(env.DB, b);
+      }
+
+      // --------------------------------------------------------
       // ★ MCP 中转路由（Codex / 手机端接入）
       // --------------------------------------------------------
       if (path === '/api/v1/mcp/tools' && req.method === 'GET') {
@@ -912,29 +909,35 @@ export default {
         const tn = b.tool_name || b.name;
         if (!tn) return fail('缺少 tool_name');
 
-        // 本地直通类
-        if (tn === 'status') return prismPassthrough(env, '/api/bot/status');
-        if (tn === 'models') return prismPassthrough(env, '/api/ai/models');
-        if (tn === 'skills') return prismPassthrough(env, '/api/ai/skills');
-        if (tn === 'plugins') return prismPassthrough(env, '/api/plugin/list');
+        // 目标设备（不填就用最近在线的那台）
+        const devId: string | undefined = b.device_id || undefined;
+
+        // Prism 本地 REST 直通类（经被控端中继）
+        if (tn === 'status') return prismPassthrough(env, '/api/bot/status', 'GET', undefined, devId);
+        if (tn === 'models') return prismPassthrough(env, '/api/ai/models', 'GET', undefined, devId);
+        if (tn === 'skills') return prismPassthrough(env, '/api/ai/skills', 'GET', undefined, devId);
+        if (tn === 'plugins') return prismPassthrough(env, '/api/plugin/list', 'GET', undefined, devId);
         if (tn === 'packet_history') {
           const act = b.arguments?.action || 'list';
-          if (act === 'list') return driveTool(env, 'list_packets', {});
-          if (act === 'stats') return driveTool(env, 'packet_stats', {});
+          if (act === 'list') return driveTool(env, 'list_packets', {}, { deviceId: devId });
+          if (act === 'stats') return driveTool(env, 'packet_stats', {}, { deviceId: devId });
           return driveTool(env, 'query_packets', {
             limit: b.arguments?.limit ?? 50,
             ...(b.arguments?.packet_type ? { type: b.arguments.packet_type } : {}),
-          });
+          }, { deviceId: devId });
         }
         if (tn === 'packet_send') {
           return driveTool(env, 'send_packet', {
             type: b.arguments?.packet_type,
             data: b.arguments?.data || {},
-          });
+          }, { deviceId: devId });
         }
 
         // 其余一律视为 Prism 原生工具名
-        return driveTool(env, tn, b.arguments || {}, b.session_name);
+        return driveTool(env, tn, b.arguments || {}, {
+          deviceId: devId,
+          sessionName: b.session_name,
+        });
       }
 
       // 实时抓包订阅
