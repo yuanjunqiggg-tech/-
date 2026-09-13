@@ -43,6 +43,25 @@ cp -v "$SRC/res/xml/"*.xml "$DST/res/xml/"
 cp -v "$SRC/AndroidManifest.xml" "$DST/AndroidManifest.xml"
 
 # ------------------------------------------------------------
+# Web 资源（www/ → android/app/src/main/assets/public/）
+#
+# ★★ 这一步曾经漏掉，是个会静默吞掉所有前端改动的坑：
+#    Capacitor 只在 `npx cap copy/sync` 时才把 www/ 拷进 Android 工程。
+#    如果构建流程里没有这一步，你改了 www/index.html、重新构建、
+#    装上去 —— 界面上却一点变化都没有，因为 APK 里装的还是
+#    上一次 cap copy 的旧副本。而且构建照样成功、版本号照样更新，
+#    完全没有报错，只能靠「解包 APK 搜关键字」才发现。
+#    （真踩过：v1.5 改了轮询守卫，解包一看 assets/public/index.html
+#      里根本没有那串代码。）
+#
+#    这里直接拷，等价于 cap copy 对 web 资源的处理，且不依赖 npx。
+# ------------------------------------------------------------
+echo "同步 Web 资源..."
+mkdir -p "$DST/assets/public"
+cp -r "$HERE/www/." "$DST/assets/public/"
+echo "  ✓ www/ → assets/public/"
+
+# ------------------------------------------------------------
 # 版本号
 #
 # ★ 为什么要在同步脚本里改版本号：

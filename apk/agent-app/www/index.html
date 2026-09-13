@@ -460,10 +460,11 @@ async function prismStatus(){
  * 把注册到的凭据交给原生层，让它开起自己的轮询线程。
  * 这样即使 WebView 被云手机冻住，设备也不会掉线。
  */
-async function pushCredentialsToNative(){
+async function pushCredentialsToNative(quiet){
   const p = nativePlugin();
   if(!p || !p.setCredentials){
-    log('（非 APK 环境，跳过原生轮询）', 'wn');
+    if(!quiet) log('（非 APK 环境，跳过原生轮询，改用网页轮询）', 'wn');
+    nativePollingActive = false;
     return false;
   }
   try{
@@ -474,14 +475,18 @@ async function pushCredentialsToNative(){
       port: parseInt(st.prism_port || 8080),
       name: st.device_name || '',
     });
-    if(r && r.nativePolling){
-      log('原生轮询已接管（锁屏也不会掉线）', 'ok');
-    }else{
-      log('原生轮询已就绪', 'ok');
+    nativePollingActive = !!(r && r.nativePolling);
+    if(!quiet){
+      if(nativePollingActive){
+        log('原生轮询已接管（锁屏也不会掉线；网页轮询已停手）', 'ok');
+      }else{
+        log('原生轮询没起来，改用网页轮询兜底', 'wn');
+      }
     }
     return true;
   }catch(e){
-    log('原生轮询启动失败：' + (e.message||e), 'wn');
+    if(!quiet) log('原生轮询启动失败：' + (e.message||e) + '，改用网页轮询兜底', 'wn');
+    nativePollingActive = false;
     return false;
   }
 }
@@ -578,7 +583,11 @@ async function doBind(){
 
     // ★ 把凭据交给原生层并开起原生轮询。
     //   云手机锁屏/切后台会冻住 WebView 的 JS 定时器（真机实测 3 分钟就掉线），
-    //   原生线程不受影响。两边同时跑也没事——服务端领指令是原子的。
+    //   原生线程不受影响。
+    //   ⚠️ 别再让两边同时跑！之前这里写着「服务端领指令是原子的，两边跑也没事」，
+    //      是错的：原子领取只保证不重复执行，保证不了指令不被网页侧抢走，
+    //      而网页侧一锁屏就冻住，被它抢到的指令会永远卡在「已领取」。
+    //      startLoop() 里已有守卫，原生接管后会自动不启动。
     await pushCredentialsToNative();
 
     enterRunView();
@@ -661,18 +670,26 @@ async function refreshStatus(){
   }
 
   let cloudOk = false;
-  try{
-    const r = await cloud('/api/v1/device/heartbeat', 'POST', {
-      prism_online: prismOnline,
-      bot_connected: botConnected,
-      bot_server: server,
-      battery: await readBattery(),
-    });
-    cloudOk = !!r.ok;
-    if(r.ok) lastHb = Date.now();
-    else log('心跳被拒：' + (r.error||'?'), 'er');
-  }catch(e){
-    log('云端不可达：' + e.message, 'er');
+  if(nativePollingActive){
+    // ★ 心跳交给原生轮询线程发（它带的信息更全：机器人状态、守护模式、App 版本）。
+    //   网页这边再发一次会把「原生线程已死」这个故障彻底盖住 ——
+    //   设备看着在线，实际没人领指令，表现成指令莫名超时。
+    cloudOk = true;
+    lastHb = Date.now();
+  }else{
+    try{
+      const r = await cloud('/api/v1/device/heartbeat', 'POST', {
+        prism_online: prismOnline,
+        bot_connected: botConnected,
+        bot_server: server,
+        battery: await readBattery(),
+      });
+      cloudOk = !!r.ok;
+      if(r.ok) lastHb = Date.now();
+      else log('心跳被拒：' + (r.error||'?'), 'er');
+    }catch(e){
+      log('云端不可达：' + e.message, 'er');
+    }
   }
 
   renderStatus({
@@ -688,7 +705,25 @@ async function refreshStatus(){
 let loopRunning = false;
 let loopGen = 0;
 
+/**
+ * 原生轮询是否已接管。
+ *
+ * ★ 接管之后网页轮询**必须停手**，这是踩过的坑：
+ *   两边同时在领指令时，「服务端领指令是原子的」只能保证**不重复执行**，
+ *   但保证不了**指令不被网页这一侧抢走**。而网页的 JS 定时器在云手机锁屏 /
+ *   切后台时会被冻住 —— 被它抢到的那条指令就永远卡在「已领取」状态，
+ *   既不执行也不重试。
+ *   表现就是：设备明明显示在线，指令却一直超时。
+ *   另外网页每 20 秒还会发一次心跳，原生轮询线程真死了也照样显示在线，
+ *   把故障完全掩盖掉。
+ */
+let nativePollingActive = false;
+
 function startLoop(){
+  if(nativePollingActive){
+    log('原生轮询已接管，网页轮询不启动（避免两边抢指令）', 'ok');
+    return;
+  }
   if(loopRunning) return;
   loopRunning = true;
   const gen = ++loopGen;
@@ -1145,15 +1180,29 @@ async function startAgentService(){
 
   // 定时刷新状态 + 保活自检
   setInterval(()=>{
-    if(st.device_id){
-      refreshStatus();
-      checkKeepalive().catch(()=>{});
+    if(!st.device_id) return;
+    refreshStatus();
+    checkKeepalive().catch(()=>{});
+
+    // ★ 原生轮询的看门狗 + 自愈。
+    //   setCredentials 是幂等的（线程已在跑就忽略），顺手还能拿到它是否还活着。
+    //   万一原生线程死了，这一次调用会把它重新拉起来；
+    //   真拉不起来就切回网页轮询兜底 ——
+    //   绝不能出现「两边都不领指令」的空档，那比两边抢指令更糟。
+    if(nativePollingActive){
+      pushCredentialsToNative(true).then(()=>{
+        if(!nativePollingActive){
+          log('原生轮询线程已不在，切回网页轮询兜底', 'wn');
+          startLoop();
+        }
+      }).catch(()=>{});
     }
   }, 30000);
 })();
 
 // 页面可见性变化时（云手机切后台回来）重连
 document.addEventListener('visibilitychange', ()=>{
+  if(nativePollingActive) return;          // 原生接管了，不掺和
   if(!document.hidden && st.device_id && !loopRunning){
     log('页面恢复可见，重启循环', 'wn');
     startLoop();
