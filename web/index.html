@@ -136,6 +136,7 @@
     <span class="dot" id="statusDot"></span>
     <span class="logo">AI 帮写</span>
     <span class="spacer"></span>
+    <button class="tbtn" onclick="switchView('packets')">抓包</button>
     <button class="tbtn" onclick="switchView('devices')">设备</button>
     <button class="tbtn" onclick="switchView('models')">模型</button>
     <button class="tbtn" onclick="switchView('agent')">AI接入</button>
@@ -160,6 +161,58 @@
       <!-- 对话 -->
       <div class="view" id="viewChat">
         <div id="chatArea"><div class="empty">选择或新建一个会话开始对话</div></div>
+      </div>
+
+      <!-- ★ 抓包：历史回看 + 实时订阅 -->
+      <div class="view hide" id="viewPackets">
+        <h2 style="margin:0 0 4px;font-size:18px">抓包</h2>
+        <p style="color:var(--dim);font-size:13px;margin:0 0 16px">
+          历史回看：从云端抓包表查。实时订阅：让被控端盯一段时间，把新包抓回来。
+        </p>
+
+        <div class="card">
+          <h3>实时订阅</h3>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div style="flex:1;min-width:90px">
+              <label style="font-size:12px;color:var(--dim)">时长(秒)</label>
+              <input id="pkDur" type="number" value="10" min="1" max="60" style="width:100%">
+            </div>
+            <div style="flex:2;min-width:120px">
+              <label style="font-size:12px;color:var(--dim)">包类型(可空)</label>
+              <input id="pkType" placeholder="如 Login" style="width:100%">
+            </div>
+            <button class="tbtn pri" id="pkSubBtn" onclick="subscribePackets()">开始抓</button>
+          </div>
+          <div id="pkSubOut" style="margin-top:10px;font-size:12px;color:var(--dim)"></div>
+        </div>
+
+        <div class="card">
+          <h3>历史回看</h3>
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div style="flex:1;min-width:80px">
+              <label style="font-size:12px;color:var(--dim)">时间窗(秒)</label>
+              <input id="pkWin" type="number" value="3600" style="width:100%">
+            </div>
+            <div style="flex:2;min-width:110px">
+              <label style="font-size:12px;color:var(--dim)">类型</label>
+              <input id="pkFType" placeholder="可空" style="width:100%">
+            </div>
+            <div style="flex:2;min-width:110px">
+              <label style="font-size:12px;color:var(--dim)">关键词</label>
+              <input id="pkFkw" placeholder="搜 fields" style="width:100%">
+            </div>
+            <button class="tbtn" onclick="loadPackets()">查询</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <b>统计</b><span class="spacer" style="flex:1"></span>
+            <span id="pkCount" style="font-size:12px;color:var(--dim)"></span>
+          </div>
+          <div id="pkStats" style="font-size:12px;color:var(--dim);margin-bottom:10px"></div>
+          <div id="packetList"><div class="empty">点上方「查询」或「开始抓」</div></div>
+        </div>
       </div>
 
       <!-- ★ 设备管理（云手机/云主机列表） -->
@@ -422,7 +475,7 @@ async function api(path, opts){
    视图切换
 ============================================================ */
 function switchView(name){
-  ['viewChat','viewPrompts','viewSettings','viewModels','viewAgent','viewDevices'].forEach(function(id){
+  ['viewChat','viewPrompts','viewSettings','viewModels','viewAgent','viewDevices','viewPackets'].forEach(function(id){
     $(id).classList.toggle('hide', id !== 'view' + name.charAt(0).toUpperCase() + name.slice(1));
   });
   $('inputBar').style.display = name === 'chat' ? 'flex' : 'none';
@@ -430,7 +483,108 @@ function switchView(name){
   if (name === 'settings') loadTemplates();
   if (name === 'models') loadModels();
   if (name === 'devices') { loadDevices(); refreshBindUrl(); }
+  if (name === 'packets') { syncPacketDevice(); loadPackets(); }
   if (name === 'agent') { refreshMcpUrl(); mcpToolsCache = null; $('mcpTools').innerHTML = '<div class="empty">点上方「测试连接」后显示</div>'; }
+}
+
+/* ============================================================
+   ★ 抓包：历史回看 + 实时订阅
+============================================================ */
+/* 没有显式选设备时，拿最近在线的那台，避免用户困惑「为什么查不到」 */
+async function syncPacketDevice(){
+  if (S.deviceId) return;
+  try {
+    var d = await api('/api/v1/devices');
+    var ds = d.devices || [];
+    var now = Date.now();
+    var on = ds.filter(function(x){
+      return x.status === 1 && now - (x.last_seen || 0) < 90000;
+    })[0];
+    S.deviceId = (on || ds[0] || {}).id || '';
+  } catch(e){ /* 忽略，后面查询会报出来 */ }
+}
+
+function pkTime(ts){
+  var t = new Date(ts);
+  return ('0'+t.getHours()).slice(-2) + ':' + ('0'+t.getMinutes()).slice(-2) + ':' + ('0'+t.getSeconds()).slice(-2);
+}
+
+function renderPackets(list, stats, note){
+  var box = $('packetList');
+  if (!list || !list.length) {
+    box.innerHTML = '<div class="empty">' + (note || '没有抓到包') + '</div>';
+  } else {
+    box.innerHTML = list.map(function(p){
+      var dir = p.direction === 'out' ? '↑出' : (p.direction === 'in' ? '↓入' : '·');
+      var f = p.fields ? JSON.stringify(p.fields) : '';
+      if (f.length > 220) f = f.slice(0, 220) + '…';
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          '<b style="font-family:var(--mono);font-size:12px">' + esc(p.packet_type || '?') + '</b>' +
+          '<span style="font-size:11px;color:var(--dim)">' + esc(dir) + '</span>' +
+          '<span style="font-size:11px;color:var(--dim)">' + (p.size != null ? p.size + 'B' : '') + '</span>' +
+          '<span class="spacer" style="flex:1"></span>' +
+          '<span style="font-size:11px;color:var(--dim)">' + pkTime(p.captured_at) + '</span>' +
+        '</div>' +
+        (f ? '<div style="font-size:11px;color:var(--dim);font-family:var(--mono);' +
+             'margin-top:4px;word-break:break-all">' + esc(f) + '</div>' : '') +
+      '</div>';
+    }).join('');
+  }
+  $('pkCount').textContent = (list ? list.length : 0) + ' 条';
+  $('pkStats').innerHTML = (stats || []).map(function(s){
+    return '<span style="display:inline-block;margin:0 8px 4px 0;padding:2px 7px;' +
+           'border-radius:5px;background:var(--panel2)">' + esc(s.packet_type || '?') +
+           ' × ' + s.c + '</span>';
+  }).join('') || '<span style="color:var(--dim)">（无统计）</span>';
+}
+
+async function loadPackets(){
+  var box = $('packetList');
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  await syncPacketDevice();
+  if (!S.deviceId) {
+    box.innerHTML = '<div class="empty" style="color:var(--warn)">还没有被控端。先去「设备」页接一台进来。</div>';
+    $('pkCount').textContent = ''; $('pkStats').innerHTML = '';
+    return;
+  }
+  var q = '?seconds=' + (parseInt($('pkWin').value,10) || 3600) +
+          '&limit=200' +
+          ($('pkFType').value.trim() ? '&type=' + encodeURIComponent($('pkFType').value.trim()) : '') +
+          ($('pkFkw').value.trim() ? '&keyword=' + encodeURIComponent($('pkFkw').value.trim()) : '');
+  try {
+    var d = await api('/api/v1/devices/' + S.deviceId + '/packets' + q);
+    renderPackets(d.packets || [], d.stats || [], '这个时间窗内没有包');
+  } catch(e){
+    box.innerHTML = '<div class="empty" style="color:var(--err)">查询失败：' + esc(e.message) + '</div>';
+  }
+}
+
+async function subscribePackets(){
+  var btn = $('pkSubBtn'), out = $('pkSubOut');
+  var dur = Math.min(Math.max(parseInt($('pkDur').value, 10) || 10, 1), 60);
+  btn.disabled = true;
+  out.textContent = '正在让被控端抓 ' + dur + ' 秒…（需要 Prism 里的机器人已连服）';
+  $('packetList').innerHTML = '<div class="empty">抓包中…</div>';
+  await syncPacketDevice();
+  try {
+    var d = await api('/api/v1/mcp/packet/subscribe', {
+      method: 'POST',
+      body: {
+        duration: dur,
+        packet_type: $('pkType').value.trim() || undefined,
+        device_id: S.deviceId || undefined,
+      },
+    });
+    out.textContent = '完成：' + (d.rounds || 0) + ' 轮，抓到 ' + (d.captured || 0) + ' 条';
+    renderPackets(d.packets || [], [], '这段时间没有新包 —— 确认机器人已进服、且 Prism 抓包功能已开');
+  } catch(e){
+    out.textContent = '';
+    $('packetList').innerHTML =
+      '<div class="empty" style="color:var(--err)">抓包失败：' + esc(e.message) + '</div>';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /* ============================================================

@@ -167,6 +167,18 @@ def main():
         txt_out = str((r.get("result") or {}).get("text", ""))[:80]
         print(f"        chat 回文 = {txt_out}")
 
+        # ---- 抓包的两条路（控制台「抓包」页用的就是这两个）----
+        dev_id = r.get("device_id")
+        st, txt = http(f"/api/v1/devices/{dev_id}/packets?seconds=3600&limit=200")
+        j = json.loads(txt)
+        check("抓包历史接口可用", st == 200 and j.get("ok") is True, txt[:200])
+
+        st, txt = http("/api/v1/mcp/packet/subscribe", "POST",
+                       {"duration": 5, "device_id": dev_id}, timeout=120)
+        j = json.loads(txt)
+        check("实时抓包订阅不报错", st == 200 and j.get("ok") is True, txt[:250])
+        print(f"        subscribe = {str(j.get('data'))[:120]}")
+
     finally:
         cleanup()
 
