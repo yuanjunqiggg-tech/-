@@ -75,12 +75,10 @@ public class AgentService extends Service {
     public void onTaskRemoved(Intent rootIntent) {
         // 用户从最近任务里划掉 App 时，系统会调到这里。
         // 云手机场景下我们希望能自己爬起来，所以主动重启一次。
+        // ★ 必须用 startSafely —— 这里 App 已在后台，Android 12+ 会拒绝，
+        //   裸调 startForegroundService 会抛异常导致进程崩溃。
         Log.w(TAG, "任务被移除，尝试自启");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(new Intent(this, AgentService.class));
-        } else {
-            startService(new Intent(this, AgentService.class));
-        }
+        startSafely(this);
         super.onTaskRemoved(rootIntent);
     }
 
@@ -90,13 +88,10 @@ public class AgentService extends Service {
         releaseWakeLock();
         Log.w(TAG, "前台服务被销毁");
 
-        // 被销毁后主动尝试重启（除非用户明确停止）
+        // 被销毁后主动尝试重启（除非用户明确停止）。
+        // ★ 同样必须走 startSafely。
         if (!AgentPrefs.isUserStopped(this)) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(new Intent(this, AgentService.class));
-            } else {
-                startService(new Intent(this, AgentService.class));
-            }
+            startSafely(this);
         }
         super.onDestroy();
     }
@@ -184,15 +179,47 @@ public class AgentService extends Service {
     // 静态工具：供 Activity / 其他组件调用
     // ============================================================
 
+    /**
+     * 安全启动前台服务。
+     *
+     * ★ 这个包装是必需的，不是过度防御。
+     *
+     * Android 12（API 31）起，App 处于后台时调用 startForegroundService()
+     * 会抛 ForegroundServiceStartNotAllowedException。
+     * 而以下几个调用点恰恰都在后台发生：
+     *   - onDestroy()      服务被回收时
+     *   - onTaskRemoved()  用户划掉任务后
+     *   - BootReceiver     开机广播（部分 ROM 上也不许）
+     *
+     * 裸调会抛未捕获异常 → 进程直接崩溃，
+     * 表现就是「云手机上的被控端时不时就消失」。
+     *
+     * 失败时并不代表永久失败：
+     *   - 系统回收导致的销毁由 START_STICKY 兜底重建
+     *   - 下次用户打开 App，MainActivity 会再次 ensureServiceRunning()
+     *
+     * @return 是否成功发出启动请求
+     */
+    public static boolean startSafely(Context ctx) {
+        try {
+            Intent i = new Intent(ctx, AgentService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ctx.startForegroundService(i);
+            } else {
+                ctx.startService(i);
+            }
+            return true;
+        } catch (Throwable t) {
+            // 用 Throwable 而非 Exception：部分 ROM 抛的是 Error 子类
+            Log.w(TAG, "启动前台服务被拒绝（Android 12+ 后台限制）：" + t.getMessage());
+            return false;
+        }
+    }
+
     /** 启动（或确认已启动）前台服务 */
     public static void start(Context ctx) {
         AgentPrefs.setUserStopped(ctx, false);
-        Intent i = new Intent(ctx, AgentService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            ctx.startForegroundService(i);
-        } else {
-            ctx.startService(i);
-        }
+        startSafely(ctx);
     }
 
     /** 用户主动停止 —— 之后不再自动拉起 */

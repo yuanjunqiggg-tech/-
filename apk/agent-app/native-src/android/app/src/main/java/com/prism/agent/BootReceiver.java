@@ -42,15 +42,11 @@ public class BootReceiver extends BroadcastReceiver {
         Log.i(TAG, "开机广播到达：" + action + "，拉起前台服务");
         AgentPrefs.setLastBoot(ctx, System.currentTimeMillis());
 
-        try {
-            Intent svc = new Intent(ctx, AgentService.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ctx.startForegroundService(svc);
-            } else {
-                ctx.startService(svc);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "拉起服务失败：" + e.getMessage());
+        // 走 AgentService.startSafely：
+        // 部分 ROM 在开机广播阶段也不允许起前台服务，
+        // 抛异常会连带把广播接收流程搞崩，必须吞掉。
+        if (!AgentService.startSafely(ctx)) {
+            Log.w(TAG, "开机自启未成功，等用户下次打开 App 时再拉起");
         }
     }
 }
