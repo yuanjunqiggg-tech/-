@@ -69,6 +69,9 @@ def _force_utf8_console():
 
 _force_utf8_console()
 
+# http.client.HTTPResponse.read1 —— 流式读取的关键（老版本没有就退回纯阻塞读）
+_HAS_READ1 = hasattr(__import__("http.client", fromlist=["HTTPResponse"]).HTTPResponse, "read1")
+
 # ------------------------------------------------------------
 # 配置
 # ------------------------------------------------------------
@@ -417,9 +420,22 @@ def _chat_stream_once(payload: dict, on_event):
         # ★ 用较大分块读，减少切分次数；并且在流结束后处理残余 buf，
         #   避免最后一个事件（常见于 ai_tool_done / ai_done）因缺少结尾空行被丢弃
         while True:
-            chunk = resp.read(4096)
+            # ★ 不能用 resp.read(4096)：BufferedReader.read(n) 会**死等**凑满 n 字节
+            #   或 EOF。流式响应里这意味着
+            #     a) 每 4096 字节才吐一次，打字机效果没了
+            #     b) 服务端不关连接时（短回复 + keep-alive）直接永久卡死
+            #   read1() 最多一次系统调用，有多少返回多少；返回空只说明"暂时没数据"，
+            #   不能直接当 EOF，所以再用 read(1) 阻塞等一个字节来区分"结束"和"稍等"。
+            chunk = b""
+            if _HAS_READ1:
+                try:
+                    chunk = resp.read1(4096)
+                except Exception:
+                    chunk = b""
             if not chunk:
-                break
+                chunk = resp.read(1)      # EOF 时返回 b""
+                if not chunk:
+                    break
             buf += chunk.decode("utf-8", "replace")
             while "\n\n" in buf:
                 idx = buf.index("\n\n")

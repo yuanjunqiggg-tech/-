@@ -136,6 +136,7 @@
     <span class="dot" id="statusDot"></span>
     <span class="logo">AI 帮写</span>
     <span class="spacer"></span>
+    <button class="tbtn" onclick="switchView('devices')">设备</button>
     <button class="tbtn" onclick="switchView('models')">模型</button>
     <button class="tbtn" onclick="switchView('agent')">AI接入</button>
     <button class="tbtn" onclick="switchView('prompts')">提示词</button>
@@ -159,6 +160,36 @@
       <!-- 对话 -->
       <div class="view" id="viewChat">
         <div id="chatArea"><div class="empty">选择或新建一个会话开始对话</div></div>
+      </div>
+
+      <!-- ★ 设备管理（云手机/云主机列表） -->
+      <div class="view hide" id="viewDevices">
+        <h2 style="margin:0 0 4px;font-size:18px">被控端设备</h2>
+        <p style="color:var(--dim);font-size:13px;margin:0 0 16px">
+          这里是在云手机/云主机上跑的被控端。选一台作为「当前设备」，
+          之后对话和工具调用都会发到它。
+        </p>
+        <div class="card">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <b>当前设备</b>
+            <span class="spacer" style="flex:1"></span>
+            <button class="tbtn" onclick="loadDevices()">刷新</button>
+          </div>
+          <div id="curDevice" style="font-size:13px;color:var(--dim)">加载中…</div>
+        </div>
+        <div class="card">
+          <h3>全部设备</h3>
+          <div id="deviceList"><div class="empty">加载中…</div></div>
+        </div>
+        <div class="card">
+          <h3>接入一台新设备</h3>
+          <p style="font-size:13px;color:var(--dim);margin:0 0 10px">
+            在被控端机器上打开下面这个链接，密钥和网关地址已经填好，点「绑定设备」即可。
+          </p>
+          <textarea id="bindUrl" rows="3" readonly
+            style="font-family:var(--mono);font-size:12px;background:var(--bg)"></textarea>
+          <button class="tbtn" style="margin-top:8px" onclick="copyBindUrl()">复制链接</button>
+        </div>
       </div>
 
       <!-- ★ AI 模型管理（自己选、自己添加） -->
@@ -344,6 +375,7 @@ var S = {
   busy: false,
   abort: null,
   editingTemplateId: null,
+  deviceId: localStorage.getItem('dsai_device') || '',   // 当前操作的云手机
 };
 
 function $(id){ return document.getElementById(id); }
@@ -390,14 +422,84 @@ async function api(path, opts){
    视图切换
 ============================================================ */
 function switchView(name){
-  ['viewChat','viewPrompts','viewSettings','viewModels','viewAgent'].forEach(function(id){
+  ['viewChat','viewPrompts','viewSettings','viewModels','viewAgent','viewDevices'].forEach(function(id){
     $(id).classList.toggle('hide', id !== 'view' + name.charAt(0).toUpperCase() + name.slice(1));
   });
   $('inputBar').style.display = name === 'chat' ? 'flex' : 'none';
   if (name === 'prompts') loadPrompts();
   if (name === 'settings') loadTemplates();
   if (name === 'models') loadModels();
+  if (name === 'devices') { loadDevices(); refreshBindUrl(); }
   if (name === 'agent') { refreshMcpUrl(); mcpToolsCache = null; $('mcpTools').innerHTML = '<div class="empty">点上方「测试连接」后显示</div>'; }
+}
+
+/* ============================================================
+   ★ 设备管理
+============================================================ */
+function bindUrl(){
+  return 'https://prism-console-7v1.pages.dev/agent.html#key=' +
+    encodeURIComponent(S.key) + '&api=' + encodeURIComponent(S.endpoint);
+}
+function refreshBindUrl(){ $('bindUrl').value = bindUrl(); }
+function copyBindUrl(){
+  var t = $('bindUrl'); t.select(); t.setSelectionRange(0, 99999);
+  try { document.execCommand('copy'); toast('已复制','ok'); }
+  catch(e){ toast('复制失败，请手动选中','err'); }
+}
+async function loadDevices(){
+  var box = $('deviceList'), cur = $('curDevice');
+  if (!S.deviceId) S.deviceId = localStorage.getItem('dsai_device') || '';
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    var d = await api('/api/v1/devices');
+    var ds = d.devices || d || [];
+    if (!ds.length) {
+      box.innerHTML = '<div class="empty">还没有任何被控端。用下面的链接接一台进来。</div>';
+      cur.textContent = '（无）';
+      return;
+    }
+    var now = Date.now();
+    box.innerHTML = ds.map(function(x){
+      var on = x.status === 1 && now - (x.last_seen || 0) < 90000;
+      var isCur = x.id === S.deviceId;
+      return '<div class="card" style="margin-bottom:8px;padding:12px">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<span class="dot ' + (on ? 'on' : 'off') + '"></span>' +
+          '<b>' + esc(x.name || x.id) + '</b>' +
+          (isCur ? '<span style="font-size:11px;padding:2px 6px;border-radius:5px;background:var(--accent);color:#fff">当前</span>' : '') +
+          '<span class="spacer" style="flex:1"></span>' +
+          (isCur ? '' : '<button class="tbtn" onclick="pickDevice(\'' + x.id + '\')">设为当前</button>') +
+          '<button class="tbtn" onclick="delDevice(\'' + x.id + '\')">删除</button>' +
+        '</div>' +
+        '<div style="font-size:12px;color:var(--dim);margin-top:6px;font-family:var(--mono)">' +
+          esc(x.id) + ' · ' + esc(x.platform || '?') +
+          ' · ' + (on ? '在线' : '离线 ' + Math.floor((now - (x.last_seen||0))/1000) + 's') +
+          (x.prism_online ? ' · Prism✓' : '') +
+          (x.bot_connected ? ' · 机器人✓' : '') +
+          (typeof x.battery === 'number' && x.battery >= 0 ? ' · ' + x.battery + '%' : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+    var c = ds.filter(function(x){ return x.id === S.deviceId; })[0] || ds[0];
+    if (!S.deviceId) { pickDevice(c.id); return; }
+    cur.textContent = (c.name || c.id) + '  (' + c.id + ')';
+  } catch(e){
+    box.innerHTML = '<div class="empty" style="color:var(--err)">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+function pickDevice(id){
+  S.deviceId = id;
+  localStorage.setItem('dsai_device', id);
+  toast('已切换当前设备','ok');
+  loadDevices();
+}
+async function delDevice(id){
+  if (!confirm('删除这台设备？被控端需要重新绑定才能再次接入。')) return;
+  try {
+    await api('/api/v1/devices/' + id, { method:'DELETE' });
+    if (S.deviceId === id) { S.deviceId = ''; localStorage.removeItem('dsai_device'); }
+    loadDevices();
+  } catch(e){ toast(e.message,'err'); }
 }
 
 /* ============================================================
@@ -636,6 +738,7 @@ async function send(){
         model_name: S.model || undefined,
         plugin_id: S.pluginId,
         session_name: S.session,
+        device_id: S.deviceId || undefined,   // 不填则网关用最近在线的那台
         messages: S.messages.slice(0, -1),   // 不含刚推入的空 asst
       }),
     });
