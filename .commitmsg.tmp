@@ -1,5 +1,0 @@
-docs: 真机验证 POST 写通道打通（v1.4）+ 修正 mcfunction content 必须为字符串
-
-- 本机一号 v1.4 真机验证：POST /api/bot/console 与 /api/mcfunction/execute 均返回 ok
-- 纠正参数形状：content 必须是字符串，传数组回「无效JSON」
-- 同步修正 外部AI直连能力手册.md 与 prism-capabilities.json
