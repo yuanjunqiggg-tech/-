@@ -1,0 +1,47 @@
+</a>
+<h1>{{.Title}}</h1>
+{{if .Desc}}<div class="desc">{{.Desc}}</div>{{end}}
+{{range .Controls}}
+{{if eq .Type "text"}}<div class="ctrl"><div class="label">{{.Label}}</div><div class="value" data-key="{{.Key}}">-</div></div>{{end}}
+{{if eq .Type "button"}}<div class="ctrl"><button data-action="{{.Action}}" onclick="doAction(this)">{{.Label}}</button></div>{{end}}
+{{if eq .Type "input"}}<div class="ctrl"><div class="label">{{.Label}}</div><input type="text" data-key="{{.Key}}" placeholder="{{.Placeholder}}"></div>{{end}}
+{{if eq .Type "switch"}}<div class="ctrl"><label class="switch"><input type="checkbox" data-key="{{.Key}}">{{.Label}}</label></div>{{end}}
+{{if eq .Type "table"}}<div class="ctrl"><div class="label">{{.Label}}</div><table data-key="{{.Key}}"><thead><tr>{{range .Columns}}<th>{{.}}</th>{{end}}</tr></thead><tbody></tbody></table></div>{{end}}
+{{end}}
+<script>
+var PAGE = {{.PageJSON}};
+function setVal(key, v) {
+  var el = document.querySelector('[data-key="' + key + '"]');
+  if (!el) return;
+  if (el.tagName === 'TABLE') {
+    var tb = el.querySelector('tbody'); tb.innerHTML = '';
+    (v || []).forEach(function(row) {
+      var tr = document.createElement('tr');
+      (row || []).forEach(function(cell) {
+        var td = document.createElement('td'); td.textContent = cell; tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+  } else if (el.type === 'checkbox') el.checked = !!v;
+  else if (el.tagName === 'INPUT') el.value = v;
+  else el.textContent = v;
+}
+var es = new EventSource('/web/events/' + PAGE.plugin);
+es.addEventListener(PAGE.page, function(e) {
+  var d = JSON.parse(e.data);
+  for (var k in d) setVal(k, d[k]);
+});
+function doAction(btn) {
+  var args = {};
+  document.querySelectorAll('[data-key]').forEach(function(el) {
+    var k = el.getAttribute('data-key');
+    if (el.type === 'checkbox') args[k] = el.checked;
+    else if (el.value !== undefined) args[k] = el.value;
+  });
+  fetch('/web/api/' + PAGE.plugin + '/' + PAGE.page, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: btn.getAttribute('data-action'), args: args})
+  }).then(function(r) {
+    if (!r.ok) return r.text().then(function(t) { throw new Error('HTTP ' + r.status + (t ? ': ' + t : '')); });
+    return r.json();
+  }).then(function(res) { if (res.ok === false) alert('

@@ -1,0 +1,71 @@
+: '+midi+' ('+pitch.toFixed(2)+')'
+  }
+  function releaseKeyEl(el){if(el)el.classList.remove('pressed')}
+
+  vp.addEventListener('touchstart',function(e){
+    e.preventDefault();
+    if(e.touches.length>=2){
+      touchState.mode='pinch';
+      touchState.startD=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    }else{
+      var t=e.touches[0];
+      var key=findKey(t.clientX,t.clientY);
+      touchState.mode='tap';touchState.startX=t.clientX;touchState.startY=t.clientY;
+      touchState.startOff=vp.scrollLeft;touchState.moved=false;
+      if(key){triggerKey(key);activeTouches[t.identifier]={el:key}}
+    }
+  },{passive:false});
+
+  vp.addEventListener('touchmove',function(e){
+    e.preventDefault();
+    if(touchState.mode!=='tap'||e.touches.length!==1)return;
+    var t=e.touches[0];
+    var dx=t.clientX-touchState.startX;
+    if(Math.abs(dx)>5||Math.abs(t.clientY-touchState.startY)>5)touchState.moved=true;
+    if(!touchState.moved)return;
+    if(pianoSlideLock){
+      var key=findKey(t.clientX,t.clientY);
+      var prev=activeTouches[t.identifier];
+      if(key&&(!prev||key!==prev.el)){if(prev)releaseKeyEl(prev.el);triggerKey(key);activeTouches[t.identifier]={el:key}}
+    }else{
+      vp.scrollLeft=touchState.startOff-dx;
+      var key2=findKey(t.clientX,t.clientY);
+      var prev2=activeTouches[t.identifier];
+      if(key2&&(!prev2||key2!==prev2.el)){if(prev2)releaseKeyEl(prev2.el);triggerKey(key2);activeTouches[t.identifier]={el:key2}}
+    }
+  },{passive:false});
+
+  vp.addEventListener('touchend',function(e){
+    e.preventDefault();
+    for(var i=0;i<e.changedTouches.length;i++){
+      var id=e.changedTouches[i].identifier;
+      var rec=activeTouches[id];if(rec){releaseKeyEl(rec.el);delete activeTouches[id]}
+    }
+    if(e.touches.length===0){touchState.mode=null;vp.querySelectorAll('.pressed').forEach(function(k){k.classList.remove('pressed')});activeTouches={}}
+  },{passive:false});
+  vp.addEventListener('touchcancel',function(){touchState.mode=null;vp.querySelectorAll('.pressed').forEach(function(k){k.classList.remove('pressed')});activeTouches={}});
+  vp.addEventListener('scroll',function(){var sl=document.getElementById('piano-scroll-slider');if(sl)sl.value=vp.scrollLeft});
+  vp.style.touchAction='none';
+  vp.addEventListener('contextmenu',function(e){e.preventDefault()});
+}
+
+function onPianoScrollSlide(v){
+  var vp=document.getElementById('piano-vp');if(!vp)return;
+  vp.scrollLeft=parseInt(v)
+}
+function onPianoZoomSlide(v){
+  pianoZoom=parseInt(v)/100;
+  var vp=document.getElementById('piano-vp');if(!vp)return;
+  var wk=PIANO_KEYS.filter(function(k){return!k.b});
+  var ww=Math.round(pianoBaseWk*pianoZoom);
+  vp.querySelectorAll('.pkey-white').forEach(function(el,i){el.style.width=ww+'px';el.style.minWidth=ww+'px';el.style.maxWidth=ww+'px'});
+  var bk=PIANO_KEYS.filter(function(k){return k.b});
+  vp.querySelectorAll('.pkey-black').forEach(function(el,j){
+    var wkIdx=PIANO_KEYS.indexOf(bk[j]);var wBefore=0;
+    for(var n=0;n<wkIdx;n++){if(!PIANO_KEYS[n].b)wBefore++}
+    var bw=Math.round(ww*0.6);
+    el.style.left=(wBefore*ww+ww-bw/2)+'px';el.style.width=bw+'px'
+  });
+  var z=document.getElementById('piano-zoom-val');
+  if(z)z.textContent=Math.round(pianoZoom*100)+'%'
+}

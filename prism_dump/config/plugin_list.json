@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "plugins": [
+    {
+      "id": "ds_ai_agent",
+      "name": "ds_ai_agent.lua",
+      "type": "lua",
+      "description": "",
+      "state": "unloaded",
+      "running": false,
+      "disabled": false,
+      "from_market": false,
+      "encrypted": false,
+      "can_edit_source": true,
+      "has_update": false
+    }
+  ]
+}

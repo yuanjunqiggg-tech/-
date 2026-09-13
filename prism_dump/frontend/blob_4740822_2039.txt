@@ -1,0 +1,62 @@
+
+    var lineCells = [];
+    for (var p = 0; p < width; p++) lineCells.push(fillCell);
+    lineCells = lineCells.concat(mqAnimRows[r]);
+    for (var p2 = 0; p2 < width; p2++) lineCells.push(fillCell);
+
+    var windowed = '';
+    for (var k = 0; k < width; k++) windowed += lineCells[pos + k];
+    while (windowed.length < width) windowed += fillCell;
+    windowed = windowed.substr(0, width * fillCell.length);
+
+    if (isRainbow) {
+      for (var ci = 0; ci < windowed.length; ci++) {
+        var ch = windowed[ci];
+        var ri = (ci + mqAnimFrame) % rainbowColorIds.length;
+        var rc = mcColorMap[rainbowColorIds[ri]] || '#55FF55';
+        if (ch === ' ') {
+          html += '<span style="color:' + rc + '">&nbsp;</span>';
+        } else {
+          html += '<span style="color:' + rc + '">' + escHtml(ch) + '</span>';
+        }
+      }
+    } else {
+      var c = mcColorMap[color] || '#55FF55';
+      html += '<span style="color:' + c + '">';
+      for (var ci2 = 0; ci2 < windowed.length; ci2++) {
+        var ch2 = windowed[ci2];
+        html += ch2 === ' ' ? '&nbsp;' : escHtml(ch2);
+      }
+      html += '</span>';
+    }
+    if (r < mqAnimRows.length - 1) html += '<br>';
+  }
+  el.innerHTML = html;
+}
+
+function pickMarqueeColor(el) {
+  document.querySelectorAll('.mq-cb').forEach(function(x) {
+    x.style.outline = 'none';
+    x.removeAttribute('data-selected');
+  });
+  el.style.outline = '3px solid var(--phx-primary)';
+  el.style.outlineOffset = '2px';
+  el.setAttribute('data-selected', 'true');
+}
+
+function toggleMarqueeRainbow() {
+  var rb = document.getElementById('mq-rainbow').checked;
+  document.querySelectorAll('.mq-cb').forEach(function(x) {
+    x.style.opacity = rb ? '0.4' : '1';
+    x.style.pointerEvents = rb ? 'none' : 'auto';
+  });
+}
+
+function getMarqueeColor() {
+  var sel = document.querySelector('.mq-cb[data-selected="true"]');
+  return sel ? sel.getAttribute('data-color') : 'a';
+}
+
+async function doMarqueeStart() {
+  var text = document.getElementById('mq-text').value.trim();
+  if (!text) { T('

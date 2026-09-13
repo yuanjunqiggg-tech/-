@@ -1,0 +1,537 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/task/list",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/task/resume",
+    "sample_body": "{task_id:id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/task/stop",
+    "sample_body": "{}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/task/delete",
+    "sample_body": "{task_id:id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/bot/console",
+    "sample_body": "{input:text}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/config",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/push/ack",
+    "sample_body": "{ ids: [id] }"
+  },
+  {
+    "method": "GET",
+    "path": "/api/push/pending",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/announcements",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/plugin/list",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/disabled",
+    "sample_body": "{id:id, disabled:true}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/reload",
+    "sample_body": "{id:id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/delete",
+    "sample_body": "{id:id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/meta",
+    "sample_body": "{id:id,name:name,description:desc}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/bot/status",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/cb/import/preview",
+    "sample_body": "{content:c}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cb/import/start",
+    "sample_body": "{     content:cbState.content,     start_x:x,start_y:y,start_z:z   }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cb/export/scan",
+    "sample_body": "{x1:x1,y1:y1,z1:z1,x2:x2,y2:y2,z2:z2}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cb/export/save",
+    "sample_body": "{content:content,file_name:name}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/fly/position",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/itemmaker/generate",
+    "sample_body": "{     items: items,     x: pos.x, y: pos.y, z: pos.z   }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/task/start",
+    "sample_body": "{     type: 'import',     params: {       path: gen.path,       x: pos.x, y: pos.y, z: pos.z,       rotation: 0,       speed: 9500,       import_commands: false,       dimension: 'overworld',       region_mode: 1,       pre_clear_mode: 0     }   }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/marquee/stop",
+    "sample_body": "{}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/marquee/status",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/fly/status",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/version/check",
+    "sample_body": "{}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/mapart/preview",
+    "sample_body": "{     path:path,targetW:tw,targetH:th,     orientation:document.getElementById('ma-ori').value,     use_relief:document.getElementById('ma-relief')?.checked||false,     color_space:maCs,     dither:maDither   }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/mcfunction/parse",
+    "sample_body": "{content:c}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/mcfunction/execute",
+    "sample_body": "{content:mcfnState.content,global:mcfnState.globalConfig,groups:gc,tests:te2}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/mcfunction/status",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/mcfunction/stop",
+    "sample_body": "{}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/pause",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/resume",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/play",
+    "sample_body": "{cache_key:muPath,target:document.getElementById('mu-target').getAttribute('data-value'),speed:parseFloat(document.getElementById('mu-speed').getAttribute('data-value'))||1}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/stop",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/music/status",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/queue/add",
+    "sample_body": "{cache_key:muPath}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/queue/remove",
+    "sample_body": "{index:idx}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/loop",
+    "sample_body": "{mode:next}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/queue/clear",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/next",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/prev",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/note",
+    "sample_body": "{instrument:pianoInstrument,pitch:pitch,volume:1.0}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/music/actionbar",
+    "sample_body": "{msg:'§e§l▍人工演奏中 §r§f···'}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin-market/install",
+    "sample_body": "{ id: String(id) }"
+  },
+  {
+    "method": "GET",
+    "path": "/api/camera/status",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/players/list",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/camera/start",
+    "sample_body": "{ player: camState.player }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/camera/stop",
+    "sample_body": "{}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/camera/shots",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/camera/shot/update",
+    "sample_body": "{ shot_id: shotId, updates: updates }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/camera/test",
+    "sample_body": "{ shot_id: shotId, player: camState.player }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/camera/shot/delete",
+    "sample_body": "{ shot_id: shotId }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/camera/generate",
+    "sample_body": "{ player: camState.player, format: 'text' }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/camera/test/all",
+    "sample_body": "{}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/camera/clear",
+    "sample_body": "{}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/draw/state",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/draw/palette",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/draw/stroke",
+    "sample_body": "{ points: uniq }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/draw/undo",
+    "sample_body": "{}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/draw/redo",
+    "sample_body": "{}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/draw/apply",
+    "sample_body": "{}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/draw/sync",
+    "sample_body": "{}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/draw/close",
+    "sample_body": "{}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/node/status",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/node/start",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/node/stop",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/toolbox/my-info",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/toolbox/start-trial",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/toolbox/purchase/prompt",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/toolbox/purchase/name",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/toolbox/my-info/update",
+    "sample_body": "{custom_prompt: val}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/system/restart",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/bot/connect",
+    "sample_body": "{token:document.getElementById('cfg-token').value,server:document.getElementById('bot-server').value,use_new_protocol:document.getElementById('cfg-new-protocol')?.checked||false,auth:curServerUrl,password:pass}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/bot/disconnect",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/fleet/connect",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/fleet/status",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/fleet/disconnect",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/cache/clear",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/accounts",
+    "sample_body": ""
+  },
+  {
+    "method": "GET",
+    "path": "/api/ai/models",
+    "sample_body": ""
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/ai/models",
+    "sample_body": "{name:name}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/ai/models/fetch",
+    "sample_body": "{provider:prov,base_url:base,api_key:key}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/ai/skills",
+    "sample_body": ""
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/ai/skills",
+    "sample_body": "{id:id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/ai/skills",
+    "sample_body": "{id:id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/ai/answer",
+    "sample_body": "{req_id:reqID,answer:answer}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/ai/sessions",
+    "sample_body": "{name:__ai.sessionName,plugin_id:__ai.pluginId,messages:__ai.messages}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/ai/sessions/load",
+    "sample_body": "{name:name}"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/ai/sessions",
+    "sample_body": "{name:name}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/ai/sessions/rename",
+    "sample_body": "{old_name:oldName,new_name:n}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/ai/snapshot",
+    "sample_body": "{name:name}"
+  },
+  {
+    "method": "GET",
+    "path": "/api/ai/snapshot",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/ai/snapshot/restore",
+    "sample_body": "{name:name}"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/ai/snapshot",
+    "sample_body": "{name:name}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/import",
+    "sample_body": "{path:path}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/create",
+    "sample_body": "{type:ptype,name:name,description:desc}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/file/write",
+    "sample_body": "{id:id,scope:'docs',file:'',content:st.content.docs||''}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/config",
+    "sample_body": "{id:id,config:cfg}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/export",
+    "sample_body": "{id:id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/plugin/export-saf",
+    "sample_body": "{id:id}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/parse/cancel",
+    "sample_body": ""
+  },
+  {
+    "method": "POST",
+    "path": "/api/building/voxel",
+    "sample_body": "{path:impPath}"
+  },
+  {
+    "method": "POST",
+    "path": "/api/preview/zip-building",
+    "sample_body": "{       dir: buildingDir,       name: buildingName     }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/preview/save-image",
+    "sample_body": "{         path: imgPath,         data: base64data       }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/preview/generate-gif",
+    "sample_body": "{       path: task.path,       frames: task.frames,       delay: 5     }"
+  },
+  {
+    "method": "POST",
+    "path": "/api/preview/zip",
+    "sample_body": "{dir: previewState.output.dir}"
+  }
+]

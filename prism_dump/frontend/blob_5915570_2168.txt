@@ -1,0 +1,70 @@
+
+function previewBuildScene(voxel, s, sx, sy, sz, cx, cy, cz, m) {
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xf8f8f0);
+  if (cx === undefined) cx = sx / 2;
+  if (cy === undefined) cy = sy / 2;
+  if (cz === undefined) cz = sz / 2;
+  if (m === undefined) m = Math.max(sx, sy, sz);
+
+  var filtered = [];
+  for (var i = 0; i < voxel.points.length; i++) {
+    var p = voxel.points[i];
+    if (p.c === '#ff00ff' || p.c === '#e94560') continue;
+    filtered.push(p);
+  }
+  var points = filtered.length ? filtered : voxel.points;
+
+  var groups = {};
+  for (var i = 0; i < points.length; i++) {
+    var col = points[i].c || '#e94560';
+    if (!groups[col]) groups[col] = [];
+    groups[col].push(points[i]);
+  }
+  var gk = Object.keys(groups);
+  var geom = new THREE.BoxGeometry(s * 0.85, s * 0.85, s * 0.85);
+  for (var gi = 0; gi < gk.length; gi++) {
+    var color = gk[gi], arr = groups[color];
+    var mat = new THREE.MeshPhongMaterial({ color: color, specular: 0x111111, shininess: 20 });
+    var mesh = new THREE.InstancedMesh(geom, mat, arr.length);
+    var dummy = new THREE.Object3D();
+    for (var j = 0; j < arr.length; j++) {
+      dummy.position.set(arr[j].x, arr[j].y, arr[j].z);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(j, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    scene.add(mesh);
+  }
+
+  scene.add(new THREE.AmbientLight(0x888888));
+  var dl = new THREE.DirectionalLight(0xffffff, 0.8);
+  dl.position.set(cx + m, cy + m * 2, cz + m);
+  scene.add(dl);
+
+  return scene;
+}
+
+function previewGen2D(file, buildingName, onDone) {
+  if (previewGenState.canceled) { onDone(); return; }
+  var gs = previewGenState;
+
+  var body = {
+    files: [file.path],
+    angles: [],
+    output: {
+      format: previewState.output.format,
+      width: previewState.output.width,
+      height: previewState.output.height,
+      mode: previewState.output.mode || 'folder',
+      dir: previewState.output.dir
+    },
+    gen_topdown: gs.genTopDown,
+    gen_elevation: gs.genElevation,
+    gen_gif: false,
+    save_config: false
+  };
+
+  A('POST', '/api/preview/generate', body).then(function(r) {
+    if (r.ok) {
+      // 

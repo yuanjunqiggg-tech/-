@@ -1,0 +1,59 @@
+
+var pianoZoom=1.0,pianoZoomMin=0.5,pianoZoomMax=2.5;
+var pianoBaseWk=28; // base white key width in px
+var pianoBroadcastTimer=null;
+
+function renderPianoKeys(){
+  var wk=PIANO_KEYS.filter(function(k){return!k.b});
+  var bk=PIANO_KEYS.filter(function(k){return k.b});
+  var wkWidth=Math.round(pianoBaseWk*pianoZoom);
+  var html='<div class="piano-viewport" id="piano-vp">'+
+    '<div class="piano-inner" id="piano-inner">';
+  for(var i=0;i<wk.length;i++){
+    html+='<div class="pkey-white" data-pidx="'+i+'" data-midi="'+wk[i].m+'" style="width:'+wkWidth+'px;min-width:'+wkWidth+'px;max-width:'+wkWidth+'px">'+
+      '<span class="pkey-label">'+wk[i].l+'</span></div>'
+  }
+  for(var j=0;j<bk.length;j++){
+    var wkIdx=PIANO_KEYS.indexOf(bk[j]);
+    var wBefore=0;for(var n=0;n<wkIdx;n++){if(!PIANO_KEYS[n].b)wBefore++}
+    var bw=Math.round(wkWidth*0.6);
+    var left=wBefore*wkWidth+wkWidth-bw/2;
+    html+='<div class="pkey-black" data-midi="'+bk[j].m+'" style="left:'+left+'px;width:'+bw+'px"></div>'
+  }
+  html+='</div></div>';
+  return html
+}
+
+function attachPianoEvents(){
+  var vp=document.getElementById('piano-vp');if(!vp)return;
+  var activeTouches={};
+  var touchState={mode:null,startX:0,startY:0,startOff:0,moved:false};
+
+  function findKey(px,py){
+    var rect=vp.getBoundingClientRect();
+    var relX=px-rect.left+vp.scrollLeft;
+    var relY=py-rect.top;
+    var blacks=vp.querySelectorAll('.pkey-black');
+    for(var i=blacks.length-1;i>=0;i--){
+      var b=blacks[i].getBoundingClientRect();
+      var bx=b.left-rect.left+vp.scrollLeft,by=b.top-rect.top;
+      if(relX>=bx&&relX<=bx+b.width&&relY>=by&&relY<=by+b.height)return blacks[i]
+    }
+    var whites=vp.querySelectorAll('.pkey-white');
+    for(var i=0;i<whites.length;i++){
+      var w=whites[i].getBoundingClientRect();
+      var wx=w.left-rect.left+vp.scrollLeft,wy=w.top-rect.top;
+      if(relX>=wx&&relX<=wx+w.width&&relY>=wy&&relY<=wy+w.height)return whites[i]
+    }
+    return null
+  }
+
+  function triggerKey(el){
+    if(!el)return;
+    var midi=parseInt(el.dataset.midi);if(!midi)return;
+    el.classList.add('pressed');
+    var pitch=midiToPitch(midi);
+    stopPreview();
+    if(pianoLocalSound)playLocalSound(pianoInstrument,pitch,1.0);
+    A('POST','/api/music/note',{instrument:pianoInstrument,pitch:pitch,volume:1.0});
+    A('POST','/api/music/actionbar',{msg:'

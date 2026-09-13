@@ -1,0 +1,35 @@
+{
+  "config": {
+    "token": "adb//620a66423550df8bb21fa92927206246ea0fcf52bd74ca3f",
+    "auth_url": "https://prism.adblanlu.qzz.io",
+    "server_code": "98014267",
+    "server_pass": "",
+    "bot_name": "",
+    "import_speed": 1024,
+    "export_speed": 0,
+    "media_display": "",
+    "media_target": "",
+    "show_progress": false,
+    "data_dir": "",
+    "import_commands": true,
+    "cmd_disabled": false,
+    "exclude_fluids": false,
+    "exclude_water": true,
+    "exclude_waterlogged": true,
+    "exclude_lava": true,
+    "use_gravity_blocks": false,
+    "gravity_platform": false,
+    "use_new_protocol": false,
+    "region_mode": "",
+    "parse_speed": "standard",
+    "pre_clear_mode": 0,
+    "custom_dns": "",
+    "bot_tokens": [
+      "adb//36430865ec10024809f47a2d2da1a26f0a6f01735c1a7e3a"
+    ],
+    "online_lock_enabled": false,
+    "exit_node_enabled": false,
+    "exit_node_user_off": true
+  },
+  "ok": true
+}

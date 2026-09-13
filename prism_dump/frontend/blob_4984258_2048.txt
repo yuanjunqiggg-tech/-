@@ -1,0 +1,62 @@
+</div>'+
+    '<input type="range" id="piano-zoom-slider" min="50" max="250" value="100" style="width:100%;margin:0;accent-color:var(--phx-primary)" oninput="onPianoZoomSlide(this.value)"></div>'+
+    '</div>'
+}
+
+function midiToPitch(note){return Math.round(Math.pow(2,(note-45)/12)*100)/100}
+
+var PIANO_KEYS=[];
+(function(){
+  var names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  var isB=[false,true,false,true,false,false,true,false,true,false,true,false];
+  for(var o=2;o<=6;o++){
+    for(var i=0;i<12;i++){
+      var midi=(o+1)*12+i;
+      PIANO_KEYS.push({l:names[i]+o,m:midi,b:isB[i]})
+    }
+  }
+})();
+
+function initAudio(){
+  if(!audioCtx){
+    try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch(e){return}
+  }
+  if(audioCtx.state==='suspended'){audioCtx.resume().catch(function(){})}
+  if(!audioReady&&!audioLoading){
+    audioLoading=true;
+    var total=0;
+    MC_SOUNDS.forEach(function(s){
+      fetch('/sounds/'+s.v+'.wav').then(function(r){
+        if(!r.ok)throw new Error('HTTP '+r.status);
+        return r.arrayBuffer()
+      }).then(function(buf){
+        return audioCtx.decodeAudioData(buf)
+      }).then(function(ab){
+        audioBufs[s.v]=ab; total++;
+        if(total>=MC_SOUNDS.length){audioReady=true}
+      }).catch(function(){
+        total++; if(total>=MC_SOUNDS.length){audioReady=true}
+      })
+    });
+  }
+}
+
+function pickMidi(){
+  if (useBuiltinPicker && typeof showFilePicker === 'function') {
+    showFilePicker('/storage/emulated/0', 'music', function(path){
+      if(!path) return;
+      if (path.indexOf('music://') === 0) {
+        playServerSong(path.slice('music://'.length));
+      } else {
+        uploadMidiFile(path);
+      }
+    });
+  } else if (typeof android !== 'undefined' && android.pickFile) {
+    fw=function(p){if(!p)return;uploadMidiFile(p)};android.pickFile('midi')
+  } else {
+    var i=document.createElement('input');i.type='file';i.accept='.mid,.midi,.mmu';
+    i.onchange=function(){var f=i.files[0];if(!f)return;uploadMidiFile(f)};i.click()
+  }
+}
+
+// 

@@ -1,0 +1,46 @@
+')+'</button>':'')+
+    '</div></div>';
+  document.body.appendChild(ov);
+  if(canClose){
+    var cb=document.getElementById('alert-close-ann');
+    if(cb)cb.onclick=function(){closeOverlay(ov)}
+  }
+  if(onAction){
+    var btn=ov.querySelector('.act-btn');
+    btn.addEventListener('click',function(){onAction();if(!keepOpen)closeOverlay(ov)})
+  }
+  ov.onclick=function(e){if(!e.target.closest('.modal-box'))closeOverlay(ov)}
+}
+
+function showAnnouncements(list){
+  for(var i=0;i<list.length;i++){
+    var a=list[i];
+    if(seenAnnouncements[a.id])continue;
+    seenAnnouncements[a.id]=true;
+    if(isDismissedToday(a.id))continue;
+    if(a.display_mode==='banner'){showAnnouncementBanner(a)}
+    else if(a.display_mode==='modal'||a.display_mode==='modal_once'){
+      if(a.display_mode==='modal_once'&&dismissedAnnouncements[a.id])continue;
+      showAnnouncementModal(a)
+    }else if(a.display_mode==='inline'){showAnnouncementInline(a)}
+  }
+}
+
+function renderMD(text){
+  if(typeof marked!=='undefined'){
+    try{
+      marked.setOptions({breaks:true,gfm:true,headerIds:false,mangle:false});
+      var html=marked.parse(text||'');
+      return '<div class="ann-content">'+html+'</div>'
+    }catch(e){}
+  }
+  return '<div class="ann-content">'+escHtml(text||'').replace(/\n/g,'<br>')+'</div>'
+}
+
+function showAnnouncementBanner(a){
+  var old=document.getElementById('ann-banner');if(old)old.remove();
+  var sevCl=a.severity==='critical'?'border-left:4px solid var(--phx-error)':a.severity==='warning'?'border-left:4px solid var(--phx-warning)':'border-left:4px solid #4a90d9';
+  var b=document.createElement('div');b.id='ann-banner';
+  b.style.cssText=sevCl+';background:var(--phx-bg-card);padding:12px 16px;margin:0 16px 10px;border-radius:var(--phx-radius-sm);box-shadow:var(--phx-shadow);position:relative;max-height:200px;overflow-y:auto;font-size:12px';
+  b.innerHTML='<div style="font-weight:800;margin-bottom:6px;color:var(--phx-text);font-size:14px">'+escHtml(a.title)+'</div>'+renderMD(a.content)+
+    (a.can_dismiss?'<button style="position:absolute;top:6px;right:6px;background:none;border:none;font-size:16px;cursor:pointer;color:var(--phx-text-secondary);padding:2px 6px;margin:0" onclick="dismissToday(\''+a.id+'\');this.parentElement.remove()">

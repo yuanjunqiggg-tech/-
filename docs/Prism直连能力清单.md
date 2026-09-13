@@ -41,15 +41,15 @@ prism_rest(
 
 | 端点 | 方法 | 说明 |
 |---|---|---|
-| `/api/bot/status` | GET | 连没连、在哪个服、是不是 OP |
+| `/api/bot/status` | GET | 连没连、在哪个服、是不是 OP ✅ 真机验证 |
 | `/api/bot/console` | POST | **给机器人发命令** `{"input":"say 你好"}` |
 | `/api/bot/connect` | POST | 连机器人 `{token, server, use_new_protocol, auth, password}` |
 | `/api/bot/disconnect` | POST | 断开 |
-| `/api/players/list` | GET | 当前玩家列表 |
-| `/api/server/players` | GET | 服务器玩家 |
-| `/api/server/detail` / `find` / `owner` | GET | 服务器信息 |
+| `/api/players/list` | GET | 当前玩家列表 ✅ 真机验证 |
+| ~~`/api/server/players`~~ | — | ❌ **真机验证不存在**（返回 WebView 的 HTML，见下方「路径猜测的坑」） |
+| ~~`/api/server/detail`~~ | — | ❌ **真机验证不存在** |
 | `/api/mcfunction/execute` | POST | **批量执行指令** `{content, global, groups, tests}` |
-| `/api/mcfunction/status` / `stop` / `parse` | GET | 执行进度 / 中止 / 解析 |
+| `/api/mcfunction/status` / `stop` / `parse` | GET | 执行进度 / 中止 / 解析 ✅ status 真机验证 |
 
 ## 二、移动与飞行
 
@@ -70,8 +70,10 @@ prism_rest(
 | `GET /api/plugin/file/read?id=&scope=code\|docs&file=` | **读插件源码** |
 | `POST /api/plugin/file/write` | **写插件源码**（写完会自动热重载） |
 | `POST /api/plugin/import` / `export` / `export-saf` | 导入 / 导出 |
-| `GET /api/plugin/api-doc` / `wordbank-doc` | 插件 API 文档 / 词库文档 |
-| `GET /api/plugin/data` / `meta` / `disabled` | 数据 / 元信息 / 禁用列表 |
+| `GET /api/plugin/api-doc` / `wordbank-doc` | 插件 API 文档 / 词库文档 ✅ 真机验证 |
+| `GET /api/plugin/data` | 数据 ✅ 真机验证 |
+| `POST /api/plugin/meta` | 元信息（★ 真机验证是 **POST**，用 GET 会回「无效JSON」） |
+| `POST /api/plugin/disabled` | 禁用列表（★ 同上，是 POST） |
 
 ## 四、文件
 
@@ -137,25 +139,56 @@ POST   /api/ai/chat          {model_name,plugin_id,mode,session_name,messages}  
 ## 九、账号 / 市场 / 工具箱（Prism 自己的业务）
 
 ```
-/api/auth/login / me / nuts        /api/toolbox/my-info / nuts/balance
+/api/auth/login / nuts        /api/toolbox/my-info / nuts/balance
 /api/market/*                      /api/plugin-market/*
 /api/phoenix/*                     /api/fleet/connect / disconnect / status
 /api/push/pending / ack            Prism 自己的指令队列
 ```
 
+> ⚠ 真机验证：`GET /api/auth/me` **不存在**（返回 WebView 的 HTML）。
+> `/api/toolbox/my-info` ✅ 可用。
+
 ---
 
-## 实测记录（真机 `本机一号`，2026-09-13 16:00）
+## ★ 路径猜测的坑（真机踩出来的，必读）
+
+**Prism 对不存在的路径不返回 404，而是把 WebView 的 `index.html` 回给你。**
+所以你随手猜一个 `/api/xxx`，拿到一坨 `<!DOCTYPE html>`，
+看起来像"接口返回了东西"，其实是**路径错了**。
+
+判断办法：
+
+| 回包长什么样 | 真实含义 |
+|---|---|
+| `<!DOCTYPE html>...` | 路径不存在，被 SPA 兜底了 |
+| `{"error":"无效JSON"}` | 路径**存在**，但它是 POST 端点，你用了 GET |
+| `{"error":"未连接到服务器"}` | 路径**存在**且正常，只是机器人没连 |
+| 正常 JSON | 通 |
+
+---
+
+## 实测记录
+
+### 全量巡检（2026-09-13 16:15，设备 `本机一号`）
+
+只读 GET 端点巡检 29 个 → **23 个真实可用**。
+完整逐项结果见 **[`docs/端点巡检报告.md`](./端点巡检报告.md)**，
+可随时用 `python tools/probe_prism_endpoints.py` 重跑。
+
+分类：`ok` 20 个 / `ok-pre` 3 个（端点活着，只是机器人没连）/
+`needs-body` 2 个（其实是 POST）/ `not-found` 4 个（路径猜错）。
+
+### 早期记录（2026-09-13 16:00）
 
 | 端点 | 结果 |
 |---|---|
 | `GET /api/bot/status` | `{connected:false, server:"98014267", is_op:true}` |
 | `GET /api/plugin/list` | 1 个插件 `ds_ai_agent`（lua，未运行） |
-| `GET /api/ai/sessions` | 多个历史会话（8-25 起，含 `ds_ai_agent`） |
+| `GET /api/ai/sessions` | 20 个历史会话（8-25 起，含 `ds_ai_agent`） |
 | `GET /api/ai/sessions/recent` | 完整读回了 9-12 那段对话 |
-| `GET /api/task/list` | 有已完成任务（导入类） |
-| `GET /api/files/scan` | 读到了 `/storage/emulated/0` 下的目录 |
-| `GET /api/fly/status` | `{"error":"未连接到服务器"}` —— 机器人没连时的正常表现 |
+| `GET /api/task/list` | 66 条任务（导入类） |
+| `GET /api/files/scan` | 读到了 `/storage/emulated/0` 下的目录（112 项） |
+| `GET /api/fly/status` | `{"error":"未连接到服务器"}` —— 端点正常，机器人没连 |
 | `POST /api/bot/console` | `{"error":"无效JSON"}` —— **v1.3 之前的被控端丢了 body**，v1.3 已修 |
 
 ---

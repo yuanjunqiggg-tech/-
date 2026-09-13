@@ -1,0 +1,127 @@
+: ' + buildingName);
+      onDone();
+    }
+  });
+}
+
+function previewGenGif(file, buildingName, onDone) {
+  if (previewGenState.canceled) { if (onDone) onDone(); return; }
+  var gs = previewGenState;
+  previewLog('GIF \u6e32\u67d3: ' + buildingName);
+
+  var voxel = gs._currentVoxel;
+  if (!voxel || !voxel.points || !voxel.points.length) {
+    previewLog('\u8df3\u8fc7\uff08\u65e0\u4f53\u7d20\u6570\u636e\uff09');
+    gs.done += gs.gifFrames;
+    updateProgressGen();
+    if (onDone) onDone();
+    tryComplete();
+    return;
+  }
+
+  var frameCount = 36;
+  gs.done += frameCount;
+  updateProgressGen();
+
+  // \u540c\u6b65\u6e32\u67d3 36 \u5e27
+  var s = voxel.step || 1, sx = voxel.size_x || 10, sy = voxel.size_y || 10, sz = voxel.size_z || 10;
+  var W = previewState.output.width || 1024;
+  var H = previewState.output.height || 1024;
+  var cx = sx / 2, cy = sy / 2, cz = sz / 2, m = Math.max(sx, sy, sz);
+  var dist = m * 1.8;
+  var frames = [];
+  var scene = previewBuildScene(voxel, s, sx, sy, sz, cx, cy, cz, m);
+  var renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(1);
+  var cam = new THREE.PerspectiveCamera(45, W / H, 1, 5000);
+  var canvas = renderer.domElement;
+
+  for (var i = 0; i < frameCount; i++) {
+    var yaw = i * 10, pitch = 30;
+    var radYaw = yaw * Math.PI / 180;
+    var radPitch = pitch * Math.PI / 180;
+    cam.position.set(
+      cx + dist * Math.sin(radYaw) * Math.cos(radPitch),
+      cy + dist * Math.sin(radPitch),
+      cz + dist * Math.cos(radYaw) * Math.cos(radPitch)
+    );
+    cam.lookAt(cx, cy, cz);
+    renderer.render(scene, cam);
+    frames.push(canvas.toDataURL('image/png'));
+  }
+  updateProgressAngle('\u73af\u7ed5\u5b8c\u6210');
+
+  previewDisposeScene(scene);
+  renderer.dispose();
+
+  // \u53d1\u9001\u5230\u540e\u7aef\u5408\u6210 GIF\uff08\u4e0d\u7b49\u5f85\uff0c\u7ee7\u7eed\u4e0b\u4e00\u4e2a\u5efa\u7b51\uff09
+  var gifFilename = buildingName + '_\u73af\u7ed5\u52a8\u753b.gif';
+  var gifPath = previewState.output.dir;
+  if (previewState.output.mode === 'folder' || previewState.output.mode === 'zip') {
+    gifPath = gifPath + '/' + buildingName;
+  }
+  gifPath = gifPath + '/' + gifFilename;
+
+  gifBackendQueue.push({
+    path: gifPath,
+    frames: frames,
+    filename: gifFilename
+  });
+  previewLog('GIF \u5408\u6210: ' + gifFilename + ' (' + frames.length + ' \u5e27)');
+  processGifBackendQueue();
+
+  if (onDone) onDone();
+}
+
+// GIF \u540e\u7aef\u5408\u6210\u961f\u5217\uff1a\u6700\u591a\u540c\u65f6 2 \u4e2a
+function processGifBackendQueue() {
+  while (gifBackendActive < 2 && gifBackendQueue.length > 0) {
+    var task = gifBackendQueue.shift();
+    gifBackendActive++;
+    updateGifStatus();
+    A('POST', '/api/preview/generate-gif', {
+      path: task.path,
+      frames: task.frames,
+      delay: 5
+    }).then(function(r) {
+      gifBackendActive--;
+      if (r.ok) {
+        previewLog('GIF \u5b8c\u6210: ' + task.filename);
+      } else {
+        previewLog('GIF \u5408\u6210\u5931\u8d25: ' + (r.error || ''));
+      }
+      updateGifStatus();
+      tryComplete();
+      processGifBackendQueue();
+    });
+  }
+}
+
+function updateGifStatus() {
+  var el = document.getElementById('pv-gif-status');
+  var txt = document.getElementById('pv-gif-status-text');
+  if (!el || !txt) return;
+  var active = gifBackendActive || 0;
+  var pending = gifBackendQueue.length || 0;
+  if (active + pending === 0) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = '';
+  var parts = [];
+  if (active > 0) parts.push(active + ' \u5408\u6210\u4e2d');
+  if (pending > 0) parts.push(pending + ' \u7b49\u5f85\u5408\u6210');
+  txt.textContent = parts.join('\uff0c');
+}
+
+function tryComplete() {
+  var gs = previewGenState;
+  if (!gs) return;
+  if (gs.currentFileIdx < gs.files.length) return;
+  if (gifBackendQueue.length > 0 || gifBackendActive > 0) return;
+  previewLog('\u5168\u90e8\u5b8c\u6210\uff01');
+  previewShowGenComplete();
+}
+function sanitizeGenName(name) {
+  return String(name).replace(/[\/\\:*?"<>|

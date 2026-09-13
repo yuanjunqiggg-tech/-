@@ -1,0 +1,42 @@
+</div>':''))+
+    '</div>';
+  document.body.appendChild(ov);
+  if(a.can_dismiss)ov.addEventListener('click',function(e){if(e.target===ov)closeOverlay(ov)});
+  setTimeout(function(){
+    ov.querySelectorAll('.ann-content a').forEach(function(link){
+      link.setAttribute('target','_blank');link.setAttribute('rel','noopener noreferrer');
+      link.addEventListener('click',function(e){e.preventDefault();window.open(link.href,'_blank')})
+    });
+    ov.querySelectorAll('.ann-content img').forEach(function(img){
+      img.style.cssText='max-width:100%;border-radius:8px;cursor:pointer;margin:8px 0';
+      img.addEventListener('click',function(){showImagePreview(img.src)})
+    })
+  },100)
+}
+
+function showAnnouncementInline(a){
+  var home=document.getElementById('tab-home');if(!home)return;
+  var sevCl=a.severity==='critical'?'border-left:4px solid var(--phx-error)':a.severity==='warning'?'border-left:4px solid var(--phx-warning)':'border-left:4px solid #4a90d9';
+  var card=document.createElement('div');
+  card.style.cssText=sevCl+';background:var(--phx-bg-card);padding:14px 16px;margin-bottom:10px;border-radius:var(--phx-radius);box-shadow:var(--phx-shadow);font-size:12px';
+  card.innerHTML='<div style="font-weight:800;margin-bottom:6px;color:var(--phx-text);font-size:14px">'+escHtml(a.title)+'</div>'+renderMD(a.content);
+  home.appendChild(card)
+}
+
+function dismissToday(id){
+  try{localStorage.setItem('ann_dismiss_'+id,new Date().toDateString())}catch(e){}
+}
+function isDismissedToday(id){
+  try{return localStorage.getItem('ann_dismiss_'+id)===new Date().toDateString()}catch(e){return false}
+}
+
+function showImagePreview(src){
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer';
+  ov.innerHTML='<img src="'+src+'" style="max-width:95vw;max-height:95vh;object-fit:contain;border-radius:8px">';
+  ov.addEventListener('click',function(){ov.style.opacity='0';setTimeout(function(){ov.remove()},260)});
+  document.body.appendChild(ov)
+}
+
+function showIntegrityAlert(d){
+  showAlertModal('

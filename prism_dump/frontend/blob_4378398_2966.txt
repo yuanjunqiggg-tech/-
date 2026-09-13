@@ -1,0 +1,67 @@
+ -->
+<div class="wz-overlay" id="wizard-overlay" style="display:none">
+  <div class="wz-bg">
+    <div class="wz-blob wz-blob-gold"></div>
+    <div class="wz-blob wz-blob-green"></div>
+    <div class="wz-blob wz-blob-brown"></div>
+    <div class="wz-dots"></div>
+    <div class="wz-noise"></div>
+    <div class="wz-lines"></div>
+  </div>
+  <div class="wz-content">
+    <div class="wz-pages">
+      <div class="wz-page active" id="wz-page-1"></div>
+      <div class="wz-page" id="wz-page-2"></div>
+      <div class="wz-page" id="wz-page-3"></div>
+      <div class="wz-page" id="wz-page-4"></div>
+    </div>
+    <div class="wz-dot-bar" id="wz-dot-bar">
+      <span class="wz-dot active" onclick="goToStep(1)"></span>
+      <span class="wz-dot" onclick="goToStep(2)"></span>
+      <span class="wz-dot" onclick="goToStep(3)"></span>
+      <span class="wz-dot" onclick="goToStep(4)"></span>
+    </div>
+  </div>
+</div>
+
+<script>window.onerror=function(m,s,l,c,e){console.error('GLOBAL ERROR:',m,'at',s+':'+l);return false}</script>
+<script src="/js/theme.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/utils.js"></script>
+<script src="/js/sse.js"></script>
+<script src="/js/pages/home.js"></script>
+<script src="/js/pages/tasks.js"></script>
+<script src="/js/pages/terminal.js"></script>
+<script src="/js/pages/settings.js"></script>
+<script src="/js/pages/plugins.js"></script>
+<script src="/js/features/filepicker.js"></script>
+<script src="/js/features/helpers.js"></script>
+<script src="/js/features/building.js"></script>
+<script src="/js/features/mapart.js"></script>
+<script src="/js/features/drawing.js"></script>
+<script src="/js/features/music.js"></script>
+<script src="/js/features/skin.js"></script>
+<script src="/js/features/mapplayer.js"></script>
+<script src="/js/features/announcements.js"></script>
+<script src="/js/features/notifications.js"></script>
+<script src="/js/features/preview.js"></script>
+<script src="/js/features/building_mgmt.js"></script>
+<script src="/js/features/others.js"></script>
+<script src="/js/features/cb_engineering.js"></script>
+<script src="/js/features/itemmaker.js"></script>
+  <script src="/js/features/camera.js"></script>
+<script src="/js/features/mcfunction.js"></script>
+<script src="/js/features/fly.js"></script>
+<script src="/js/features/personalize.js"></script>
+<script src="/js/features/plugin_mgmt.js"></script>
+<script src="/js/features/plugin_market.js"></script>
+<script src="/js/features/ai_assist.js"></script>
+<script src="/js/app.js"></script>
+<script src="/wizard.js"></script>
+<script>initPersonalize();if(!wzBoot()){tabTo('home')}</script>
+<script src="/js/vendor/marked.min.js"></script>
+<script src="/js/vendor/three.min.js"></script>
+<script>console.log('THREE loaded:',typeof THREE,'marked loaded:',typeof marked)</script>
+<script>console.log('RmusicHTML exists:',typeof RmusicHTML,'openSubPage exists:',typeof openSubPage,'tabTo exists:',typeof tabTo)</script>
+</body></html>
+  

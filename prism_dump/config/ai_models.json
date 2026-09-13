@@ -1,0 +1,35 @@
+{
+  "models": [
+    {
+      "api_key": "adb/****ca3f",
+      "base_url": "https://prism.adblanlu.qzz.io/api/prism/ai",
+      "builtin": true,
+      "model_id": "auto",
+      "name": "prism自动",
+      "provider": "openai",
+      "streaming": true,
+      "thinking": "off"
+    },
+    {
+      "api_key": "YUAN****5926",
+      "base_url": "https://telangpuai.com/v1",
+      "builtin": false,
+      "model_id": "deepseek-flash",
+      "name": "强大的GPT",
+      "provider": "openai",
+      "streaming": true,
+      "thinking": "high"
+    },
+    {
+      "api_key": "sk-6****84bf",
+      "base_url": "https://api.deepseek.com",
+      "builtin": false,
+      "model_id": "deepseek-flash",
+      "name": "我的deep sick.",
+      "provider": "openai",
+      "streaming": true,
+      "thinking": "high"
+    }
+  ],
+  "ok": true
+}

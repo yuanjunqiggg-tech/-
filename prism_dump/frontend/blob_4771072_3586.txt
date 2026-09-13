@@ -1,0 +1,109 @@
+
+    document.getElementById('bottom-nav').classList.remove('gone');
+    document.getElementById('conn-bar').classList.remove('gone');
+    subPageOpen=false;
+    // keep cache, kill renderers (performance)
+    activeRenderers.forEach(function(kill){try{kill()}catch(e){}});activeRenderers=[];
+    // evict stale cache entries (keep last 10)
+    var keys=Object.keys(subPageCache);
+    if(keys.length>10){
+      var keep=keys.slice(-10);
+      Object.keys(subPageCache).forEach(function(k){
+        if(keep.indexOf(k)<0)delete subPageCache[k]
+      });
+      Object.keys(_savedFormState).forEach(function(k){
+        if(keep.indexOf(k)<0)delete _savedFormState[k]
+      });
+      Object.keys(_voxelData).forEach(function(k){
+        if(keep.indexOf(k)<0)delete _voxelData[k]
+      })
+    }
+    if(curTab==='home')refreshHomeTasks();
+  },290);
+}
+
+function serializeForm(root){
+  var st={};
+  root.querySelectorAll('input,select,textarea').forEach(function(el){
+    if(!el.id)return;
+    if(el.type==='checkbox')st[el.id]=el.checked;
+    else st[el.id]=el.value;
+  });
+  return st
+}
+
+function restoreSubPageState(key){
+  // restore form values
+  var sv=_savedFormState[key];
+  if(sv){
+    Object.keys(sv).forEach(function(id){
+      var el=document.getElementById(id);
+      if(!el)return;
+      if(el.type==='checkbox')el.checked=sv[id];
+      else el.value=sv[id]
+    })
+    // re-run conditional toggles
+    try{
+      toggleSub('imp-cmds','imp-cmd-sub');
+      toggleSub('imp-exclude-fluids','imp-fluid-sub');
+      toggleDimInput();
+      toggleGravitySub();
+      toggleMaRelief()
+    }catch(e){}
+  }
+  // recreate 3D preview if voxel data exists
+  var vd=_voxelData[key];
+  if(vd&&typeof show3D==='function'){
+    var vw=document.getElementById('viewer');
+    // if viewer was removed from cached HTML on close, re-create it
+    if(!vw){
+      var info=document.getElementById('imp-info')||document.getElementById('ma-info')||document.getElementById('skin-preview-area');
+      if(info){
+        vw=document.createElement('div');vw.className='viewer';vw.id='viewer';
+        info.appendChild(vw)
+      }
+    }
+    if(vw){
+      vw.innerHTML='';
+      requestAnimationFrame(function(){
+        if(typeof THREE!=='undefined')show3D(vw,vd)
+      })
+    }
+  }
+  // restore task-running UI if a task is active
+  if(window._currentTask){
+    var ct=window._currentTask;
+    var t2p={import:'imp',export:'exp',mapart:'md',skin:'skin'};
+    var pr=t2p[ct.type];
+    if(pr){
+      var go=document.getElementById(pr+'-go');
+      var stop=document.getElementById(pr+'-stop');
+      var pg=document.getElementById(pr+'-pg');
+      var lc=document.getElementById(pr+'-log-card');
+      if(go)go.classList.add('gone');
+      if(stop)stop.classList.remove('gone');
+      if(pg)pg.classList.remove('gone');
+      if(lc)lc.classList.remove('gone');
+      // restore progress bar if known
+      if(ct.progress>0){
+        var bar=document.getElementById(pr+'-bar');
+        if(bar)bar.style.width=(ct.progress*100)+'%'
+      }
+    }
+  }
+  // restore marquee state if on marquee page
+  if(document.getElementById('mq-text')&&typeof restoreMarqueeState==='function'){
+    restoreMarqueeState()
+  }
+  // restore mcfunction state if on mcfunction page
+  if(document.getElementById('mcfn-wrap')&&typeof restoreMcfunctionState==='function'){
+    restoreMcfunctionState()
+  }
+}
+
+function refreshHomeTasks(){
+  var section=document.querySelector('#tab-home .tsk-section');
+  if(!section)return;
+  A('GET','/api/task/list').then(function(t){
+    if(!t.ok||!t.tasks)return;
+    var h='<div class="tsk-header">

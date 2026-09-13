@@ -1,0 +1,47 @@
+
+  if(_toolboxPollTimer) clearInterval(_toolboxPollTimer);
+  _toolboxPollTimer = setInterval(pollToolboxInfo, 30000);
+}
+
+async function refreshCfg(){
+  var c=await A('GET','/api/config');
+  if(c.ok&&c.config){
+    cfgToken=c.config.token||'';
+    if(c.config.auth_url){curServerUrl=c.config.auth_url;applyServerSelection()}
+    document.getElementById('bot-server').value=c.config.server_code||'';
+    document.getElementById('cfg-token').value=c.config.token||'';
+    onTokenInput();
+    document.getElementById('cfg-speed').value=c.config.import_speed||9500;
+    var _ps=c.config.parse_speed||'standard';
+    var psEl=document.getElementById('cfg-parse-speed-picker');
+    if(psEl){psEl.setAttribute('data-value',_ps);var psItem=PARSE_SPEED_ITEMS.find(function(i){return i.value===_ps})||PARSE_SPEED_ITEMS[1];psEl.querySelector('.picker-label').textContent=psItem.label}
+    document.getElementById('cfg-import-cmds').checked=c.config.import_commands!==false;
+    document.getElementById('cfg-cmd-disabled').checked=c.config.cmd_disabled||false;
+    document.getElementById('cfg-exclude-fluids').checked=c.config.exclude_fluids||false;
+    document.getElementById('cfg-exclude-water').checked=c.config.exclude_water!==false;
+    document.getElementById('cfg-exclude-waterlogged').checked=c.config.exclude_waterlogged!==false;
+    document.getElementById('cfg-exclude-lava').checked=c.config.exclude_lava!==false;
+    document.getElementById('cfg-exit-node').checked=c.config.exit_node_enabled||false;
+    refreshNodeStatus();
+    document.getElementById('cfg-gravity').checked=c.config.use_gravity_blocks||false;
+    document.getElementById('cfg-platform').checked=c.config.gravity_platform||false;
+    if(c.config.bot_tokens){
+      _subTokens=(c.config.bot_tokens||[]).slice();
+      renderSubTokenList();
+    }
+    toggleServerPass();
+  }
+  refreshCfgStatus();
+  refreshCfgAccount();
+  pollToolboxInfo();
+}
+
+async function refreshNodeStatus(){
+  try{
+    var s=await A('GET','/api/node/status');
+    var el=document.getElementById('cfg-exit-node-status');
+    var cb=document.getElementById('cfg-exit-node');
+    if(!el) return;
+    if(s&&s.enabled){
+      if(cb) cb.checked=true;
+      if(s.status==='online') el.textContent='

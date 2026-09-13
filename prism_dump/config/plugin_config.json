@@ -1,0 +1,23 @@
+{
+  "config": {
+    "ai_key": "",
+    "ai_model": "sensenova-6.8-flash-lite",
+    "ai_thinking": false,
+    "deepseek_key": "",
+    "deepseek_url": "https://api.deepseek.com/chat/completions",
+    "qq_admin_ids": "",
+    "qq_enabled": false,
+    "qq_group_id": "1083036035",
+    "qq_poll_interval": 5,
+    "qq_relay_url": "",
+    "qq_token": "",
+    "seed_engine_account": "",
+    "seed_engine_password": "",
+    "seed_engine_token": "",
+    "seed_engine_url": "https://api.youyuanqi.dpdns.org/api/v1",
+    "web_search_key": "",
+    "web_search_model": "deepseek-flash",
+    "web_search_url": "https://api.deepseek.com/responses"
+  },
+  "ok": true
+}

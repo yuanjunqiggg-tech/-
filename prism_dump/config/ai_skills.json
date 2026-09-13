@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "skills": [
+    {
+      "description": "Minecraft 基岩版命令/选择器/坐标/参数权威参考（已内置）",
+      "id": "bedrock-commands",
+      "loaded": true,
+      "name": "基岩版指令"
+    },
+    {
+      "description": "FMbe（狐狸方块实体）：用骨骼动画 playanimation 制作展示物品/方块动画（已内置）",
+      "id": "fmbe-display",
+      "loaded": true,
+      "name": "FMbe 显示实体"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+
+function drawCanvasSize() { var wrap = document.getElementById('dr-canvas-wrap'); return { w: (wrap && wrap.clientWidth) || 300, h: (wrap && wrap.clientHeight) || 300 }; }
+function renderDrawGrid() {
+  var cv = document.getElementById('dr-canvas');
+  if (!cv || !drawSess.grid) return;
+  var w = drawSess.grid.length; if (!w) return;
+  var d = drawSess.grid[0] ? drawSess.grid[0].length : w;
+  var size = drawCanvasSize(); var dpr = window.devicePixelRatio || 1;
+  cv.width = size.w * dpr; cv.height = size.h * dpr;
+  cv.style.width = size.w + 'px'; cv.style.height = size.h + 'px';
+  var ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#0f1720'; ctx.fillRect(0, 0, size.w, size.h);
+  var px = drawZoom;
+  var x0 = Math.max(0, Math.floor(-drawOffX / px)), x1 = Math.min(w, Math.ceil((size.w - drawOffX) / px));
+  var z0 = Math.max(0, Math.floor(-drawOffY / px)), z1 = Math.min(d, Math.ceil((size.h - drawOffY) / px));
+  for (var x = x0; x < x1; x++) {
+    for (var z = z0; z < z1; z++) {
+      var cell = drawSess.grid[x] && drawSess.grid[x][z];
+      var cx = drawOffX + x * px, cy = drawOffY + z * px;
+      if (cell && cell.t) { ctx.fillStyle = (x + z) % 2 === 0 ? '#1e293b' : '#0f1720'; ctx.fillRect(cx, cy, px + 0.5, px + 0.5); }
+      else {
+        var name = (cell && cell.b) || '';
+        var tex = drawTexCache[name];
+        if (tex && tex.complete && tex.naturalWidth > 0) {
+          ctx.drawImage(tex, cx, cy, px + 0.5, px + 0.5);
+        } else {
+          var col = drawPaletteMap[name] || { r: 90, g: 90, b: 90 };
+          ctx.fillStyle = 'rgb(' + col.r + ',' + col.g + ',' + col.b + ')'; ctx.fillRect(cx, cy, px + 0.5, px + 0.5);
+        }
+      }
+    }
+  }
+  if (px >= 4) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (var i = x0; i <= x1; i++) { var lx = drawOffX + i * px; ctx.moveTo(lx, 0); ctx.lineTo(lx, size.h); }
+    for (var j = z0; j <= z1; j++) { var ly = drawOffY + j * px; ctx.moveTo(0, ly); ctx.lineTo(size.w, ly); }
+    ctx.stroke();
+  }
+}
+function drawZoomAt(sx, sy, factor) {
+  var gx = (sx - drawOffX) / drawZoom, gy = (sy - drawOffY) / drawZoom;
+  drawZoom = Math.max(2, Math.min(80, drawZoom * factor));
+  drawOffX = sx - gx * drawZoom; drawOffY = sy - gy * drawZoom; renderDrawGrid();
+}
+function drawCenter() {
+  var s = drawSess.grid; if (!s) return;
+  var w = s.length, d = s[0] ? s[0].length : w;
+  var size = drawCanvasSize();
+  drawZoom = Math.max(2, Math.min(size.w / w, size.h / d));
+  drawOffX = (size.w - w * drawZoom) / 2;
+  drawOffY = (size.h - d * drawZoom) / 2;
+}
+
+// 

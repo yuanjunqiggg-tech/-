@@ -1,0 +1,11 @@
+{
+  "files": [
+    "chat_rate.json",
+    "death_lastpos.json",
+    "ds_data.json",
+    "edge_guard.json",
+    "runtime.log",
+    "runtime_pending.log"
+  ],
+  "ok": true
+}
