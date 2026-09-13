@@ -826,7 +826,9 @@ function renderBotKeeper(res, devName){
   var modeText = { always:'一直守护', once:'只运行一次', off:'已关闭' }[mode] || mode;
   var dot = res.connected
     ? '<span style="color:var(--ok)">● 机器人在线</span>'
-    : '<span style="color:var(--err)">● 机器人未连接</span>';
+    : (res.handshaking
+        ? '<span style="color:var(--warn)">● 正在握手（等服务器授权）</span>'
+        : '<span style="color:var(--err)">● 机器人未连接</span>');
   st.innerHTML = dot + ' · 守护模式：<b>' + modeText + '</b>'
     + (res.server ? ' · 服务器 ' + res.server : '')
     + (res.attempts ? ' · 已尝试连接 ' + res.attempts + ' 次' : '');
@@ -843,6 +845,7 @@ function renderBotKeeper(res, devName){
       守护模式: mode,
       守护线程在跑: res.running,
       机器人已连接: res.connected,
+      正在握手: res.handshaking,
       服务器: res.server, 维度: res.dimension, 是OP: res.is_op,
       探测间隔秒: res.interval_sec,
       累计连接尝试: res.attempts,

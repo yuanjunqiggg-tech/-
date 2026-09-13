@@ -92,6 +92,7 @@ public final class BotKeeper {
     private volatile long lastProbeAt = 0;
     private volatile long lastConnectedAt = 0;
     private volatile long lastAttemptAt = 0;
+    private volatile long lastOkConnectAt = 0;  // 上次成功「发起」连接的时间（握手宽限期起点）
     private volatile String lastMessage = "";
     private volatile int attempts = 0;        // 累计发起连接的次数
     private volatile int failStreak = 0;      // 连续失败次数
@@ -102,6 +103,18 @@ public final class BotKeeper {
      *   没有上限的话，服务器一直连不上时 once 和 always 行为完全一样，开关就白给了。
      */
     private static final int ONCE_MAX_ATTEMPTS = 3;
+
+    /**
+     * 成功「发起」连接后，给它多久去完成握手。
+     *
+     * ★ 为什么需要：POST /api/bot/connect 返回 ok 只代表「请求被接受」，
+     *   不代表已经连上 —— 之后还要等服务器授权，可能几十秒。
+     *   Prism 自己的前端也是连上后一直轮询 /api/bot/status 等 connected 变 true，
+     *   而且明确注释「不再设强制超时」。
+     *   没有这个宽限期的话，探测发现 connected 还是 false，就会 15 秒重发一次 connect，
+     *   把正在进行的握手打断 —— 越连越连不上。
+     */
+    private static final long CONNECT_GRACE_MS = 60_000L;
 
     private BotKeeper(Context ctx) {
         this.appCtx = ctx.getApplicationContext();
@@ -140,6 +153,9 @@ public final class BotKeeper {
             o.put("attempted_at", lastAttemptAt);
             o.put("attempts", attempts);
             o.put("fail_streak", failStreak);
+            // 已发起连接、正在等服务器授权（这期间不会重发，避免打断握手）
+            o.put("handshaking",
+                    System.currentTimeMillis() - lastOkConnectAt < CONNECT_GRACE_MS);
             o.put("message", lastMessage);
         } catch (Exception ignored) {
         }
@@ -234,7 +250,11 @@ public final class BotKeeper {
                 long waitMs = Math.min(15_000L << Math.min(failStreak, 3), 120_000L);
                 boolean due = System.currentTimeMillis() - lastAttemptAt >= waitMs;
 
-                if (AgentPrefs.BOT_KEEPER_ALWAYS.equals(mode) && !connected && due) {
+                // ★ 握手宽限期：刚成功发起过连接，就安静等它连上，别重发打断
+                boolean handshaking =
+                        System.currentTimeMillis() - lastOkConnectAt < CONNECT_GRACE_MS;
+
+                if (AgentPrefs.BOT_KEEPER_ALWAYS.equals(mode) && !connected && due && !handshaking) {
                     doConnect();
                 }
 
@@ -246,7 +266,9 @@ public final class BotKeeper {
                         Log.i(TAG, lastMessage);
                         break;
                     }
-                    if (failStreak < ONCE_MAX_ATTEMPTS && due) {
+                    if (handshaking) {
+                        // 正在握手，不消耗尝试次数
+                    } else if (failStreak < ONCE_MAX_ATTEMPTS && due) {
                         doConnect();
                     } else if (failStreak >= ONCE_MAX_ATTEMPTS) {
                         // ★ 不能无限重试：只运行一次 ≠ 一直在后台重连，
@@ -340,7 +362,8 @@ public final class BotKeeper {
             boolean ok = r != null && r.optBoolean("ok", false);
             if (ok) {
                 failStreak = 0;
-                lastMessage = "已发起连接（服务器 " + serverCode + "）";
+                lastOkConnectAt = System.currentTimeMillis();
+                lastMessage = "已发起连接（服务器 " + serverCode + "），等待握手";
                 Log.i(TAG, lastMessage);
             } else {
                 failStreak++;
