@@ -374,8 +374,19 @@
             <input id="cfgEndpoint" placeholder="https://ai-api.youyuanqi.dpdns.org">
           </div>
           <div class="field">
-            <label>访问密钥</label>
-            <input id="cfgKey" type="password" placeholder="PLATFORM_ACCESS_KEY">
+            <label>访问密钥（PLATFORM_ACCESS_KEY）</label>
+            <div style="display:flex;gap:6px">
+              <input id="cfgKey" type="password" placeholder="PLATFORM_ACCESS_KEY"
+                     style="flex:1;min-width:0">
+              <button class="tbtn" onclick="toggleKey(this)" title="显示/隐藏">显示</button>
+              <button class="tbtn" onclick="copyKey()" title="复制">复制</button>
+            </div>
+            <div style="font-size:12px;color:var(--dim);margin-top:6px">
+              这把钥匙存在 Cloudflare Worker 的 <b>secret</b> 里（不在代码里，
+              所以改代码不会变）。要换就执行
+              <code style="font-family:var(--mono)">wrangler secret put PLATFORM_ACCESS_KEY</code>
+              然后重新 <code style="font-family:var(--mono)">wrangler deploy</code>。
+            </div>
           </div>
           <div class="field">
             <label>插件 ID</label>
@@ -631,6 +642,33 @@ function bindUrl(){
     encodeURIComponent(S.key) + '&api=' + encodeURIComponent(S.endpoint);
 }
 function refreshBindUrl(){ $('bindUrl').value = bindUrl(); }
+function toggleKey(btn){
+  var el = $('cfgKey');
+  if (el.type === 'password') { el.type = 'text'; btn.textContent = '隐藏'; }
+  else { el.type = 'password'; btn.textContent = '显示'; }
+}
+function copyKey(){
+  var v = $('cfgKey').value;
+  if (!v) { toast('密钥是空的','err'); return; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(v).then(
+      function(){ toast('已复制访问密钥','ok'); },
+      function(){ fallbackCopyKey(v); }
+    );
+  } else {
+    fallbackCopyKey(v);
+  }
+}
+function fallbackCopyKey(v){
+  var el = $('cfgKey');
+  var old = el.type;
+  el.type = 'text';
+  el.select(); el.setSelectionRange(0, 99999);
+  try { document.execCommand('copy'); toast('已复制访问密钥','ok'); }
+  catch(e){ toast('复制失败，点「显示」后手动选中','err'); }
+  el.type = old;
+}
+
 function copyBindUrl(){
   var t = $('bindUrl'); t.select(); t.setSelectionRange(0, 99999);
   try { document.execCommand('copy'); toast('已复制','ok'); }
