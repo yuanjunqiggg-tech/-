@@ -160,4 +160,105 @@ public class PrismNativePlugin extends Plugin {
             call.reject("无法打开应用设置：" + e.getMessage());
         }
     }
+
+    // ============================================================
+    // ★ Prism 引擎桥（拉起 / 探活 / 确保就绪）
+    // ============================================================
+    //
+    // 背景：用户要求「操纵 APK 自己的数据，而不是网页的」。
+    // 拆包已证实 APK 界面 = WebView 加载 127.0.0.1:8080，二者是同一个
+    // Go 引擎、同一份数据。所以只要保证 Prism 进程活着，我们通过 8080
+    // 下发的操作与用户在 APK 里点按钮完全等价。
+    //
+    // 这三个方法就是给 JS 侧用的「保证活着」的能力。
+    //
+    // ★ 全部丢到单线程池执行：
+    //   PrismBridge.alive() 有网络请求，主线程直接跑会
+    //   NetworkOnMainThreadException；ensure() 还会 sleep 等引擎起来。
+    // ============================================================
+
+    private java.util.concurrent.ExecutorService prismExecutor;
+
+    private java.util.concurrent.ExecutorService exe() {
+        if (prismExecutor == null || prismExecutor.isShutdown()) {
+            prismExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        }
+        return prismExecutor;
+    }
+
+    /**
+     * 查询 Prism 状态：是否安装、8080 是否响应。
+     * 返回 { installed, alive, port }
+     */
+    @PluginMethod
+    public void prismStatus(final PluginCall call) {
+        exe().execute(() -> {
+            try {
+                int port = call.getInt("port", 8080);
+                JSObject o = new JSObject();
+                o.put("installed", PrismBridge.isInstalled(getContext()));
+                o.put("alive", PrismBridge.alive(port, 1500));
+                o.put("port", port);
+                o.put("pkg", PrismBridge.PRISM_PKG);
+                call.resolve(o);
+            } catch (Throwable t) {
+                call.reject("查询 Prism 状态失败：" + t.getMessage());
+            }
+        });
+    }
+
+    /**
+     * 拉起 Prism APK（不管它现在活不活）。
+     * 返回 { ok, how }
+     */
+    @PluginMethod
+    public void prismLaunch(final PluginCall call) {
+        exe().execute(() -> {
+            try {
+                String how = PrismBridge.launch(getContext());
+                JSObject o = new JSObject();
+                o.put("ok", how != null);
+                o.put("how", how);
+                call.resolve(o);
+            } catch (Throwable t) {
+                call.reject("拉起 Prism 失败：" + t.getMessage());
+            }
+        });
+    }
+
+    /**
+     * 确保 Prism 引擎就绪：不活着就拉起并等待。
+     * 返回 { ok, how, message, costMs }
+     *
+     * @param call.port   端口，默认 8080
+     * @param call.waitMs 拉起后最长等待毫秒，默认 20000
+     */
+    @PluginMethod
+    public void prismEnsure(final PluginCall call) {
+        exe().execute(() -> {
+            try {
+                int port = call.getInt("port", 8080);
+                int waitMs = call.getInt("waitMs", 20000);
+                PrismBridge.Result r = PrismBridge.ensure(getContext(), port, waitMs);
+                JSObject o = new JSObject();
+                o.put("ok", r.ok);
+                o.put("how", r.how);
+                o.put("message", r.message);
+                o.put("costMs", r.costMs);
+                o.put("port", port);
+                call.resolve(o);
+            } catch (Throwable t) {
+                call.reject("确保 Prism 就绪失败：" + t.getMessage());
+            }
+        });
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (prismExecutor != null && !prismExecutor.isShutdown()) {
+            prismExecutor.shutdownNow();
+            prismExecutor = null;
+        }
+        super.handleOnDestroy();
+    }
 }

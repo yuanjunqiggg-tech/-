@@ -552,7 +552,14 @@ export async function pushCommand(req: Request, env: DeviceEnv, id: string): Pro
   }
 
   const kind = (b.kind || 'chat').toString();
-  const allowed = ['chat', 'tool', 'packet_sub', 'packet_send', 'prism_rest'];
+  const allowed = [
+    'chat', 'tool', 'packet_sub', 'packet_send', 'prism_rest',
+    // Prism 内置 AI帮写 的会话持久化（数据落在 Prism 自己的存储里，
+    // 用户在 APK 里打开 AI帮写 也能看到）
+    'session_list', 'session_load', 'session_save', 'session_delete',
+    // Prism 引擎状态自检（是否安装 / 8080 是否响应 / 机器人连接状态）
+    'prism_status',
+  ];
   if (!allowed.includes(kind)) {
     return jfail(`不支持的指令类型：${kind}（可用：${allowed.join(', ')}）`);
   }

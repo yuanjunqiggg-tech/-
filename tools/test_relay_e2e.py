@@ -131,6 +131,56 @@ def main():
               bool((r.get("result") or {}).get("text")), str(r)[:300])
 
         print()
+        print("-- MCP tools/call: prism_chat 带 session_name（应落盘会话）--")
+        r = mcp("prism_chat", {"prompt": "记一下：现在是自测",
+                               "session_name": "e2e-自测会话"})
+        check("带 session_name 的 prism_chat 执行成功",
+              r.get("ok") is True, str(r)[:250])
+        check("结果里回带了 session_name",
+              (r.get("result") or {}).get("session_name") == "e2e-自测会话",
+              str(r)[:300])
+
+        print()
+        print("-- MCP tools/call: prism_status（引擎自检）--")
+        r = mcp("prism_status", {})
+        check("prism_status 执行成功", r.get("ok") is True, str(r)[:250])
+        check("prism_status 带回端口与探活结果",
+              (r.get("result") or {}).get("port") == 8080
+              and ((r.get("result") or {}).get("native") or {}).get("alive") is True,
+              str(r)[:300])
+
+        print()
+        print("-- MCP tools/call: prism_session（AI帮写 会话增删改查）--")
+        r = mcp("prism_session", {"action": "save",
+                                  "session_name": "e2e-手写会话",
+                                  "messages": [{"role": "user",
+                                                "content": "你好"}]})
+        check("session save 成功",
+              (r.get("result") or {}).get("ok") is True
+              or r.get("ok") is True, str(r)[:250])
+
+        r = mcp("prism_session", {"action": "list"})
+        names = (r.get("result") or {}).get("sessions")
+        check("session list 能列出刚存的会话",
+              isinstance(names, list) and "e2e-手写会话" in names, str(r)[:300])
+
+        r = mcp("prism_session", {"action": "load",
+                                  "session_name": "e2e-手写会话"})
+        msgs = (r.get("result") or {}).get("messages")
+        check("session load 能读回消息",
+              isinstance(msgs, list) and len(msgs) == 1, str(r)[:300])
+
+        r = mcp("prism_session", {"action": "delete",
+                                  "session_name": "e2e-手写会话"})
+        check("session delete 成功",
+              (r.get("result") or {}).get("ok") is True, str(r)[:250])
+
+        r = mcp("prism_session", {"action": "list"})
+        check("删除后 list 里没有了",
+              "e2e-手写会话" not in ((r.get("result") or {}).get("sessions") or []),
+              str(r)[:300])
+
+        print()
         print("-- 控制台同源的 /api/v1/mcp/tool --")
         st, txt = http("/api/v1/mcp/tool", "POST",
                        {"tool_name": "status"}, timeout=90)

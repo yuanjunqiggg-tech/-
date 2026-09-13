@@ -114,6 +114,40 @@ const TOOLS: any[] = [
     },
   },
   {
+    name: 'prism_session',
+    description:
+      '管理 Prism 内置「AI帮写」的会话记录 —— 这些记录存在 Prism 自己的存储里，' +
+      '用户在 APK 里打开 AI帮写 能看到同一份。action：\n' +
+      '  list   列出会话（recent=true 只看最近）\n' +
+      '  load   读取某个会话的完整对话\n' +
+      '  save   写入/覆盖一个会话\n' +
+      '  delete 删除一个会话\n' +
+      '配合 prism_chat 的 session_name，就能让 AI Agent 的对话在 Prism 里长期留存。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: 'list | load | save | delete' },
+        session_name: { type: 'string', description: '会话名（load/save/delete 必填）' },
+        messages: { type: 'array', description: 'save 时的消息数组 [{role,content}]' },
+        plugin_id: { type: 'string', description: '可选，按插件过滤' },
+        recent: { type: 'boolean', description: 'list 时是否只看最近' },
+        device_id: { type: 'string', description: '可选，指定设备' },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'prism_status',
+    description:
+      '检查云手机里 Prism 引擎的状态：APK 是否安装、8080 是否响应、机器人是否已连接。' +
+      '指令超时/失败时先调这个定位是 Prism 挂了还是网络问题。',
+    inputSchema: {
+      type: 'object',
+      properties: { device_id: { type: 'string', description: '可选，指定设备' } },
+      required: [],
+    },
+  },
+  {
     name: 'list_ai_models',
     description: '列出控制台里已配置的 AI 模型（不返回密钥）。',
     inputSchema: { type: 'object', properties: {}, required: [] },
@@ -191,7 +225,14 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
       db,
       a.device_id,
       'chat',
-      { prompt: a.prompt, session_name: a.session_name },
+      {
+        message: a.prompt,          // ★ 被控端读 p.message，不是 p.prompt
+        prompt: a.prompt,           // 兼容旧字段
+        session_name: a.session_name,
+        plugin_id: a.plugin_id,
+        model_name: a.model_name,
+        mode: a.mode,
+      },
       { timeoutMs: a.timeout_ms ?? 45_000 },
     );
     return {
@@ -266,6 +307,28 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
       packet_type: a.packet_type,
       data: a.data || {},
     });
+    return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }], isError: !r.ok };
+  }
+
+  if (name === 'prism_session') {
+    const act = (a.action || 'list').toString().toLowerCase();
+    const map: Record<string, string> = {
+      list: 'session_list', load: 'session_load', save: 'session_save', delete: 'session_delete',
+    };
+    const kind = map[act];
+    if (!kind) throw new Error(`action 只支持 list/load/save/delete，收到：${act}`);
+    if (act !== 'list' && !a.session_name) throw new Error(`${act} 需要 session_name`);
+    const r = await runOnDevice(db, a.device_id, kind, {
+      session_name: a.session_name,
+      messages: a.messages,
+      plugin_id: a.plugin_id,
+      recent: !!a.recent,
+    });
+    return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }], isError: !r.ok };
+  }
+
+  if (name === 'prism_status') {
+    const r = await runOnDevice(db, a.device_id, 'prism_status', {});
     return { content: [{ type: 'text', text: JSON.stringify(r, null, 2) }], isError: !r.ok };
   }
 

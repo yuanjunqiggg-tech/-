@@ -291,6 +291,27 @@ async function prism(path, timeoutMs=8000){
   }
 }
 
+/** 向本机 Prism 发写请求（保存会话、删会话等） */
+async function prismPost(path, body, timeoutMs=10000, method='POST'){
+  const base = `http://127.0.0.1:${st.prism_port||8080}`;
+  const ctl = new AbortController();
+  const tm = setTimeout(()=>ctl.abort(), timeoutMs);
+  try{
+    const r = await fetch(base+path, {
+      method: method,
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body||{}),
+      signal: ctl.signal,
+    });
+    clearTimeout(tm);
+    const t = await r.text();
+    try{ return JSON.parse(t); }catch(e){ return {ok:r.ok, raw:t.slice(0,500)}; }
+  }catch(e){
+    clearTimeout(tm);
+    throw e;
+  }
+}
+
 // ============================================================
 // 原生桥接
 // ============================================================
@@ -383,6 +404,62 @@ async function nativeService(action){
     log('服务操作失败：' + (e.message||e), 'er');
   }
   return null;
+}
+
+// ============================================================
+// ★ Prism 引擎保活桥
+// ============================================================
+//
+// 用户诉求：「我要操纵 APK 里的东西，不是网页的；APK 自己打开更稳」。
+//
+// 拆包证实：Prism APK 的界面就是 WebView 加载 http://127.0.0.1:8080，
+// APK 内没有前端资源。所以「在 APK 里点」和「调 8080」是同一个 Go 引擎、
+// 同一份数据（/data/data/com.prismtool.box/files/）。
+// 唯一前提是进程活着 —— 所以这里做的是：指令来了先 ensure，
+// Prism 被云手机杀了就当场把它拉起来。
+// ============================================================
+
+let _prismDownSince = 0;
+
+async function prismStatus(){
+  const p = nativePlugin();
+  if(!p || !p.prismStatus) return null;
+  try{ return await p.prismStatus({port: parseInt(st.prism_port||8080)}); }
+  catch(e){ return null; }
+}
+
+/**
+ * 确保 Prism 引擎可用。
+ * @param why 用于日志的调用原因
+ * @returns {ok:boolean}
+ */
+async function ensurePrism(why){
+  const p = nativePlugin();
+  if(!p || !p.prismEnsure){
+    return { ok:true, how:'no_native' };  // 网页预览环境，跳过
+  }
+  try{
+    const r = await p.prismEnsure({
+      port: parseInt(st.prism_port||8080),
+      waitMs: 25000,
+    });
+    if(!r){
+      return { ok:true, how:'no_native' };
+    }
+    if(r.ok){
+      if(r.how !== 'already_running'){
+        log(`[Prism] ${why}：${r.message}（${r.costMs}ms）`, 'ok');
+      }
+      _prismDownSince = 0;
+    }else{
+      log(`[Prism] ${why}：${r.message}`, 'er');
+      _prismDownSince = _prismDownSince || Date.now();
+    }
+    return r;
+  }catch(e){
+    log('[Prism] ensure 失败：' + (e.message||e), 'er');
+    return { ok:false, how:'error', message:(e.message||String(e)) };
+  }
 }
 
 /** 跳到系统设置页（保活三件套） */
@@ -635,6 +712,17 @@ async function execCommand(cmd){
   curCmd = cmd;
   const p = cmd.payload || {};
 
+  // ★ 执行任何指令前，先确保 Prism 引擎活着。
+  //   云手机经常回收后台进程；没有这一步，Prism 被杀后
+  //   所有指令都会以「连接被拒绝」告终，只能人工去点开 APK。
+  if(!p.skip_prism_check){
+    const e = await ensurePrism('指令前自检');
+    if(e && e.ok === false){
+      await finishCmd({ prism_down:true, how:e.how }, 'Prism 未运行且无法自动拉起：' + (e.message||''));
+      return;
+    }
+  }
+
   try{
     if(cmd.kind === 'chat'){
       await runChat(p);
@@ -648,6 +736,34 @@ async function execCommand(cmd){
     }else if(cmd.kind === 'prism_rest'){
       const r = await prism(p.path||'/api/bot/status', 20000);
       await finishCmd(r, null);
+
+    // ---- Prism 会话持久化（AI帮写 的对话记录）----
+    }else if(cmd.kind === 'session_list'){
+      const pid = encodeURIComponent(p.plugin_id||'');
+      const r = p.recent
+        ? await prism('/api/ai/sessions/recent?plugin_id='+pid, 15000)
+        : await prism('/api/ai/sessions?plugin_id='+pid, 15000);
+      await finishCmd(r, null);
+    }else if(cmd.kind === 'session_load'){
+      if(!p.session_name){ await finishCmd(null,'session_load 缺少 session_name'); return; }
+      const r = await prismPost('/api/ai/sessions/load', {name:p.session_name});
+      await finishCmd(r, null);
+    }else if(cmd.kind === 'session_save'){
+      if(!p.session_name){ await finishCmd(null,'session_save 缺少 session_name'); return; }
+      const r = await prismPost('/api/ai/sessions', {
+        name:p.session_name, plugin_id:p.plugin_id||'', messages:p.messages||[],
+      });
+      await finishCmd(r, null);
+    }else if(cmd.kind === 'session_delete'){
+      if(!p.session_name){ await finishCmd(null,'session_delete 缺少 session_name'); return; }
+      const r = await prismPost('/api/ai/sessions', {name:p.session_name}, 10000, 'DELETE');
+      await finishCmd(r, null);
+
+    }else if(cmd.kind === 'prism_status'){
+      const st2 = await prismStatus();
+      const bot = await prism('/api/bot/status', 8000).catch(()=>null);
+      await finishCmd({ native: st2, bot, port: parseInt(st.prism_port||8080) }, null);
+
     }else{
       await finishCmd(null, '未知指令类型：' + cmd.kind);
     }
@@ -661,11 +777,33 @@ async function runChat(p){
   if(!msg){ await finishCmd(null, 'chat 指令缺少 message'); return; }
   log('对话：' + msg.slice(0,60) + (msg.length>60?'…':''));
 
+  const sname = p.session_name || '';
+  const msgs  = p.messages || [{role:'user', content:msg}];
+
   const r = await aiStream({
-    session_name: p.session_name,
-    messages: p.messages || [{role:'user', content:msg}],
+    session_name: sname,
+    plugin_id: p.plugin_id,
+    model_name: p.model_name,
+    mode: p.mode,
+    messages: msgs,
   });
-  await finishCmd({text:r.text, tools:r.tools}, null);
+
+  // ★ 持久化到 Prism 自己的会话库（/api/ai/sessions）
+  //   这才是「APK 里能看到的、关掉界面也还在」的那份数据。
+  //   用户在 APK 里打开 AI帮写 → 会话列表，就能看到 AI Agent 建的记录。
+  let saved = false;
+  if(sname && r.text){
+    try{
+      await prismPost('/api/ai/sessions', {
+        name: sname,
+        plugin_id: p.plugin_id || '',
+        messages: msgs.concat([{role:'assistant', content:r.text}]),
+      });
+      saved = true;
+    }catch(e){ log('会话落盘失败：'+(e.message||e), 'wn'); }
+  }
+
+  await finishCmd({text:r.text, tools:r.tools, session_name:sname, persisted:saved}, null);
 }
 
 async function runTool(p){

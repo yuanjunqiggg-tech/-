@@ -47,6 +47,10 @@ def log(m):
     print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 
 
+# 假的 AI帮写 会话库，进程内保存，用来验证 session_* 四类指令
+FAKE_SESSIONS = {}
+
+
 def fake_exec(cmd):
     """伪造执行结果 —— 不需要真 Prism"""
     kind = cmd.get("kind")
@@ -55,10 +59,17 @@ def fake_exec(cmd):
     events, result = [], None
 
     if kind == "chat":
-        text = f"（模拟被控端）已收到：{str(payload.get('messages', [{}])[-1].get('content', ''))[:40]}"
+        # ★ 与真被控端一致：优先读 message，退回 messages[0].content
+        msg = payload.get("message")
+        if not msg:
+            msgs = payload.get("messages") or [{}]
+            msg = (msgs[-1] or {}).get("content", "")
+        text = f"（模拟被控端）已收到：{str(msg)[:40]}"
         for ch in text:
             events.append({"type": "chunk", "payload": {"text": ch}})
-        result = {"text": text, "tools": []}
+        result = {"text": text, "tools": [],
+                  "session_name": payload.get("session_name") or None,
+                  "persisted": bool(payload.get("session_name"))}
     elif kind == "tool":
         tn = payload.get("tool_name")
         events = [
@@ -72,6 +83,36 @@ def fake_exec(cmd):
                   "bot_connected": True, "server": "模拟服务器"}
     elif kind == "packet_send":
         result = {"sent": True, "packets": []}
+
+    # ---- AI帮写 会话持久化（对应 Prism 的 /api/ai/sessions）----
+    elif kind == "session_list":
+        names = list(FAKE_SESSIONS.keys())
+        result = {"ok": True, "sessions": names, "count": len(names)}
+    elif kind == "session_save":
+        name = payload.get("session_name")
+        if not name:
+            result = {"ok": False, "error": "缺少 session_name"}
+        else:
+            FAKE_SESSIONS[name] = payload.get("messages") or []
+            result = {"ok": True, "saved": name,
+                      "messages": len(FAKE_SESSIONS[name])}
+    elif kind == "session_load":
+        name = payload.get("session_name")
+        result = ({"ok": True, "name": name, "messages": FAKE_SESSIONS[name]}
+                  if name in FAKE_SESSIONS
+                  else {"ok": False, "error": "会话不存在：" + str(name)})
+    elif kind == "session_delete":
+        name = payload.get("session_name")
+        existed = FAKE_SESSIONS.pop(name, None) is not None
+        result = {"ok": existed, "deleted": name}
+
+    # ---- Prism 引擎自检 ----
+    elif kind == "prism_status":
+        result = {"ok": True, "port": 8080,
+                  "native": {"installed": True, "alive": True,
+                             "pkg": "com.prismtool.box"},
+                  "bot": {"bot_connected": True}}
+
     else:
         result = {"mock": True, "kind": kind}
 
