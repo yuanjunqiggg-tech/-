@@ -2666,15 +2666,21 @@ function market_clone_one(sx,sy,sz,tx,ty,tz)
     local cmd=string.format("clone %d %d %d %d %d %d %d %d %d replace",math.floor(sx),math.floor(sy),math.floor(sz),math.floor(sx),math.floor(sy),math.floor(sz),math.floor(tx),math.floor(ty),math.floor(tz)); local ok,res=pcall(game.isCmdSuccess,cmd); return ok and res==true,cmd
 end
 function market_clear_barrel_drop(name,x,y,z)
-    -- ★ 修 bug（2026-09-13）：这里原来是个**空函数**，只 return true 什么都不做。
-    --   后果：上架确认时用 `setblock ... air destroy` 打掉木桶，
-    --   木桶里的物品全掉在地上没人管 —— 表现就是「方块没了，东西撒一地」。
-    --   旧注释写「绝不清理周围无关掉落物」是因噎废食：
-    --   把半径收到 2 格，并且只在打掉木桶的**同一时刻**执行，
-    --   就只可能命中刚从这个木桶里掉出来的东西，不会误伤玩家脚下的其它掉落物。
-    if tonumber(x)==nil or tonumber(y)==nil or tonumber(z)==nil then return false end
-    local bx,by,bz=math.floor(x),math.floor(y),math.floor(z)
-    pcall(game.isCmdSuccess,string.format('kill @e[type=item,x=%d,y=%d,z=%d,r=2]',bx,by,bz))
+    -- ⚠⚠ 这里**故意什么都不做**。改之前请务必读完下面这段。
+    --
+    -- 这个函数有三处调用，语义完全相反：
+    --   1) market_finish_sell（上架）—— 木桶内容已 clone 进仓库，打掉后的掉落物是垃圾 → 该清
+    --   2) market_purchase_execute_clone（购买）—— 木桶从仓库 clone 到玩家脚下，
+    --      打掉后的掉落物**就是买家付了积分要拿的货** → 谁清谁赔钱
+    --   3) 会话超时清理 —— 用的是 `air`（replace，本来就不掉落）→ 无所谓
+    --
+    -- 曾经想在这里写 `kill @e[type=item,r=2]`，那是错的：
+    -- 它会在第 2 处把买家刚买到的东西一并删掉，而且思路本身就是
+    -- 「先制造垃圾再扫掉」，还顺带误伤玩家脚下的其它掉落物。
+    --
+    -- ★ 正确做法在调用点 1：把 `setblock ... air destroy` 换成 `air replace`
+    --   —— 内容既然已经进仓库了，直接替换成空气，压根不会产生掉落物。
+    --   不制造垃圾，就不需要清理。
     return true
 end
 
@@ -3420,7 +3426,14 @@ function market_finish_sell(name)
     if market_storage_db().x==nil then send(name,"§c管理权限尚未设置玩家市场三维仓库，请先设置：.市场仓库 X Y Z"); return true end
     local id=tostring(s.id); set_market_busy(true); local ok,entry=market_save_nbt_item(id,s.barrel_pos.x,s.barrel_pos.y,s.barrel_pos.z); if not ok then set_market_busy(false); send(name,"§c商品保存失败："..tostring(entry)); return true end
     local c=market_storage_coord(id); local cloned=market_clone_one(s.barrel_pos.x,s.barrel_pos.y-1,s.barrel_pos.z,c.x,c.y,c.z); if not cloned then set_market_busy(false); send(name,"§c商品原版 clone 到三维仓库失败，商品未上架。"); return true end
-    pcall(game.isCmdSuccess,string.format('setblock %d %d %d air destroy',math.floor(s.barrel_pos.x),math.floor(s.barrel_pos.y-1),math.floor(s.barrel_pos.z))); market_clear_barrel_drop(name,s.barrel_pos.x,s.barrel_pos.y-1,s.barrel_pos.z)
+    -- ★ 修 bug（2026-09-13）「上架确认后掉落物撒一地」：
+    --   上一行已经把木桶 clone 进三维仓库、NBT 也已存好，
+    --   所以这里**不需要** destroy（会掉一地物品），直接 replace 成空气即可 ——
+    --   根本不产生掉落物，也就不用再清理。
+    --   ⚠ 千万别改回 destroy：改成 destroy 就必须清掉落物，
+    --      而 market_clear_barrel_drop 在购买流程里也会被调用，
+    --      在那里清掉落物 = 把买家刚买到的东西删掉。
+    pcall(game.isCmdSuccess,string.format('setblock %d %d %d air replace',math.floor(s.barrel_pos.x),math.floor(s.barrel_pos.y-1),math.floor(s.barrel_pos.z))); market_clear_barrel_drop(name,s.barrel_pos.x,s.barrel_pos.y-1,s.barrel_pos.z)
     local db=market_db(); db.listings[id]={id=id,name=s.name,price=s.price,seller=name,seller_uuid=uuid_key(name),storage_id=id,preview_nbt=entry.nbt,created_at=util.timestamp(),sold=false,sold_count=0,disabled=false,shop_banned=false,reports=0}; db.next_id=math.max(tonumber(db.next_id)or 1,tonumber(s.id)+1); market_save(db)
     r.market_sell_day.count=(tonumber(r.market_sell_day.count)or 0)+1; r.market_sell_day.last_at=util.timestamp(); d.market_sessions[name]=nil; clear_menu(d,r); save_data(d); set_market_busy(false); append_json_log(SHOP_LOG_FILE,{at=util.timestamp(),type="上架",seller=name,id=id,name=s.name,price=s.price,storage_id=id}); send(name,"§a商品已上架！\n§f商品名：§e"..s.name.."\n§f价格：§6"..s.price.."积分\n§f编号：§b"..id); return true
 end
@@ -3435,6 +3448,10 @@ function market_purchase_execute_clone(name,id,price)
     local board=scoreboard_name(); if not board then send(name,"§c服务器尚未设置积分版。") return true end; local ok,balance=pcall(game.getScore,board,name); balance=ok and tonumber(balance)or 0; price=tonumber(price)or tonumber(v.price)or 0; if balance<price then send(name,"§c积分不足，购买取消。") return true end
     local pos=player_position(name); if not pos then send(name,"§c无法读取购买位置。") return true end; local x,y,z=math.floor(pos.x),math.floor(pos.y),math.floor(pos.z); set_market_busy(true); local cloned=market_clone_storage_to_target(v.id,x,y,z); if not cloned then set_market_busy(false); send(name,"§c仓库发货失败，未扣积分。"); return true end
     local safe=string.gsub(name,'"','\\"'); local rem_ok,rem_res=pcall(game.isCmdSuccess,'scoreboard players remove "'..safe..'" '..board..' '..math.floor(price)); if not rem_ok or rem_res~=true then set_market_busy(false); send(name,"§c扣分失败，购买取消。") return true end
+    -- ★ 这里的 destroy 是**故意的**：木桶刚从仓库 clone 到玩家脚下，
+    --   打掉后掉出来的物品就是买家付了积分要拿的货（下一行会提示「商品已掉落在你身边」）。
+    --   ⚠ 绝对不要改成 replace，也不要让 market_clear_barrel_drop 在这里真的清掉落物
+    --      —— 那等于收了钱不发货。
     pcall(game.isCmdSuccess,string.format('setblock %d %d %d air destroy',x,y,z)); market_clear_barrel_drop(name,x,y,z); v.sold=true; v.sold_count=(tonumber(v.sold_count)or 0)+1; v.sold_at=util.timestamp(); v.buyer=name; v.buyer_uuid=uuid_key(name); db.listings[tostring(id)]=v; market_save(db)
     local seller=v.seller; local seller_online=false; for _,nm in ipairs(online_players()or {}) do if uuid_key(nm)==v.seller_uuid then seller=nm; seller_online=true; break end end
     if seller_online then
