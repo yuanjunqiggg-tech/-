@@ -526,15 +526,70 @@
 ## 六、怎么用（三种入口）
 
 1. **MCP 网址**（外部 AI 用）
-   `https://ai-api.youyuanqi.dpdns.org/mcp?key=<平台密钥>`
-   12 个工具：`prism_rest` 是主通道，`prism_status` 用来诊断，
+
+   **★ 强烈建议在末尾加上 `&agent=<你的名字>`，这样你会拿到一个编号，
+   管理员就能在游戏里点名找你：**
+   ```
+   https://ai-api.youyuanqi.dpdns.org/mcp?key=<平台密钥>&agent=codex
+   ```
+   连上后 `initialize` 会直接告诉你「你是 N 号」以及现在谁在线。
+
+   14 个工具：`prism_rest` 是主通道，`prism_status` 用来诊断，
    `bot_keeper` 管机器人连接（掉线自动重连），
    `ai_assist_context` 提供 AI帮写 的系统提示词和技能知识库（改插件必读），
+   **`agent_inbox` 收游戏里的口信 + `agent_me` 查自己是几号**（见下面第七节），
    `prism_chat`/`prism_tool` 是走内置 AI 的旧通道（不推荐）。
 2. **命令行**（我调试用）
    `python tools/mcp.py rest /api/bot/status`
-   `python tools/mcp.py rest /api/bot/console POST '{"input":"say 你好"}'`
+   `python tools/mcp.py rest /api/bot/console POST '{"input":"你好"}'`
 3. **控制台网页**：https://prism-console-7v1.pages.dev/
+   页面：聊天 / 抓包 / 设备 / 模型 / AI接入 / **名单** / **电脑** / 提示词 / 设置
+
+---
+
+## 七、★ AI Agent 编号路由（多人协作不抢活）
+
+可能同时有好几个 AI 连着，每个人一个**固定编号**（首次出现顺序，永久保留）。
+
+| 游戏聊天框输入 | 谁收到 |
+|---|---|
+| `AI Agent 2 把钻石剑降到 50 积分` | **只有 2 号** |
+| `AI Agent 把钻石剑降价` | 广播，所有在线的 |
+| `.AIAgent列表` | 查看名单（编号/在线/类型/心跳） |
+
+**云端 API**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/agent/registry` | 列出全部，`?only=1` 只要在线 |
+| POST | `/api/v1/agent/registry` | `{kind,name,label,meta}` 登记/心跳，返回编号 |
+| POST | `/api/v1/agent/inbox` | 加 `agent_no` 字段就是点名 |
+| GET | `/api/v1/agent/inbox?agent_no=2` | 只取广播 + 点名 2 号的 |
+
+三类 agent：`mcp`（外部 AI，靠心跳，2 分钟判离线）、`model`（云端模型，常驻）、
+`pc`（电脑上的 CLI，由 `tools/pc_agent.py` 注册）。
+
+**真机验证过**：1 号能看到广播 + 点名自己的；2 号看不到点名 1 号的那条。
+点名一个离线的号，插件会提示玩家而不是静默丢弃。
+
+## 八、★ 手机遥控电脑（PC 桥）
+
+电脑上跑 `python tools/pc_agent.py`（或双击 `启动电脑端.bat`），
+手机控制台 →「电脑」页就能开会话让它跑 Codex / Claude Code / Gemini / shell，
+输出实时回传，还能传文件过去。**电脑是拨出去的，不需要公网 IP、不用开端口。**
+
+| 方法 | 路径 | 谁用 |
+|---|---|---|
+| GET/POST | `/api/v1/pc/sessions` | 手机列/开会话 |
+| POST | `/api/v1/pc/poll` | **电脑**领活（长轮询） |
+| POST | `/api/v1/pc/claim` | **电脑**领走会话 |
+| POST | `/api/v1/pc/output` | **电脑**回传输出 |
+| POST | `/api/v1/pc/input` | 手机追问 |
+| POST | `/api/v1/pc/upload` | 手机传文件（≤1.5MB） |
+| GET | `/api/v1/pc/messages?session_id=&since=` | 手机看输出 |
+
+会话状态：`pending`（等电脑领）→ `running` → `done` / `error`。
+一直是 `pending` = 电脑上 `pc_agent.py` 没在跑。
 
 ---
 
