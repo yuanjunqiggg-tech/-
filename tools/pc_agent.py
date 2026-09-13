@@ -36,7 +36,13 @@ import sys
 import time
 import urllib.request
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+# ★ 别强制 utf-8：Windows 的 cmd 默认是 GBK(936)，强制 utf-8 会让中文变乱码。
+#   这里只加 errors=replace 做容错，编码交给终端自己决定。
+try:
+    sys.stdout.reconfigure(errors="replace")
+    sys.stderr.reconfigure(errors="replace")
+except Exception:
+    pass
 
 DEFAULT_KEY = "5dc5ad3751b01175e3e02a6f01ccc8cf0c32142d89345c62fd10af993ff71791"
 DEFAULT_GATEWAY = "https://ai-api.youyuanqi.dpdns.org"

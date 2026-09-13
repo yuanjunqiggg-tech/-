@@ -4160,6 +4160,302 @@ function ai_agent_no_of(list, n)
     return nil
 end
 
+-- ============================================================
+--   AI Agent 供应商选择（.Agent 选择 / .AI agent 内容）
+--
+--   设计要点：**不新增任何密钥填写**。
+--   AI帮写 里已经填好的那几个 API（Prism 的 /api/ai/models）会直接列进来，
+--   选中就能用，base_url 和 key 都是现成的。
+--   另外留 4 个自定义槽（Codex / 豆包 / WorkBuddy / DeepSeek），
+--   想用自己 key 时用 .Agent 配置 填一次即可。
+-- ============================================================
+AGENT_PRISM_API = "http://127.0.0.1:8080"
+AGENT_CUSTOM_SLOTS = {
+    {key="codex",     label="Codex"},
+    {key="doubao",    label="豆包"},
+    {key="workbuddy", label="WorkBuddy"},
+    {key="deepseek",  label="DeepSeek"},
+}
+AGENT_PICK_FILE = "agent_picked.json"
+
+function agent_custom_file() return game.dataDir().."/agent_providers.json" end
+function agent_pick_file() return game.dataDir().."/"..AGENT_PICK_FILE end
+
+function agent_load_custom()
+    local ok,d = pcall(util.json_load, agent_custom_file())
+    if ok and type(d)=="table" then return d end
+    return {}
+end
+function agent_save_custom(t) return pcall(util.json_write, agent_custom_file(), t or {}) end
+
+function agent_load_pick()
+    local ok,d = pcall(util.json_load, agent_pick_file())
+    if ok and type(d)=="table" then return d end
+    return nil
+end
+function agent_save_pick(t) return pcall(util.json_write, agent_pick_file(), t or {}) end
+
+-- ★ 从 Prism 本机读「AI帮写里已经配好的模型」—— 带 base_url 和 key，零配置
+function agent_prism_models()
+    local ok,res = pcall(http.get, AGENT_PRISM_API.."/api/ai/models", {timeout=6})
+    if not ok then return {} end
+    local body = type(res)=="table" and (res.body or res.text) or tostring(res)
+    local ok2,d = pcall(http.json_decode, body)
+    if not ok2 or type(d)~="table" then return {} end
+    local out={}
+    for _,m in ipairs(d.models or {}) do
+        out[#out+1] = {
+            kind="prism",
+            label=tostring(m.name or m.model_id or "?"),
+            base_url=tostring(m.base_url or ""),
+            api_key=tostring(m.api_key or ""),
+            model_id=tostring(m.model_id or ""),
+        }
+    end
+    return out
+end
+
+-- 拼出完整选项：4 个自定义槽 + AI帮写已配的
+function agent_all_options()
+    local list={}
+    local custom=agent_load_custom()
+    for _,s in ipairs(AGENT_CUSTOM_SLOTS) do
+        local c = custom[s.key] or {}
+        local bu=tostring(c.base_url or ""); local ak=tostring(c.api_key or "")
+        list[#list+1] = {
+            kind="custom", slot=s.key, label=s.label,
+            base_url=bu, api_key=ak, model_id=tostring(c.model_id or ""),
+            ready = (bu~="" and ak~=""),
+        }
+    end
+    for _,m in ipairs(agent_prism_models()) do
+        m.ready = (m.base_url~="" and m.api_key~="")
+        list[#list+1]=m
+    end
+    return list
+end
+
+-- 把「选中记录」解析成真正可用的供应商（prism 类每次重新拉，key 变了自动跟上）
+function agent_resolve()
+    local pick=agent_load_pick(); if type(pick)~="table" then return nil end
+    if pick.kind=="prism" then
+        for _,m in ipairs(agent_prism_models()) do
+            if m.model_id==tostring(pick.model_id or "") then return m end
+        end
+        return nil  -- Prism 那边把模型删了
+    end
+    if pick.kind=="custom" then
+        local c=agent_load_custom()[tostring(pick.slot or "")] or {}
+        if tostring(c.base_url or "")=="" or tostring(c.api_key or "")=="" then return nil end
+        return {kind="custom", slot=pick.slot, label=tostring(c.label or pick.slot),
+                base_url=tostring(c.base_url), api_key=tostring(c.api_key),
+                model_id=tostring(c.model_id or "")}
+    end
+    return nil
+end
+
+-- 各种 base_url 写法统一成完整的 chat/completions 地址
+function agent_api_url(base)
+    base=trim(tostring(base or "")); if base=="" then return "" end
+    local lowb=lower(base)
+    if lowb:find("chat/completions",1,true) then return base end
+    if lowb:sub(-3)=="/v1" then return base.."/chat/completions" end
+    if lowb:sub(-1)=="/" then return base.."v1/chat/completions" end
+    return base.."/v1/chat/completions"
+end
+
+-- 解析 Prism /api/ai/chat 的 SSE 回包，把 ai_chunk 里的 text 拼起来
+function agent_parse_sse(raw)
+    local out={}
+    for line in tostring(raw or ""):gmatch("[^\r\n]+") do
+        local js = line:match("^data:%s*(.+)$")
+        if js then
+            local ok,d = pcall(http.json_decode, js)
+            if ok and type(d)=="table" and type(d.text)=="string" then
+                out[#out+1]=d.text
+            end
+        end
+    end
+    return table.concat(out,"")
+end
+
+-- ★ 走 Prism 自己的 AI 通道（/api/ai/chat）。
+--   这是关键：AI帮写 里配好的 key 由 Prism 自己拿着，
+--   插件只要报一个 model_name 就行 —— **一个密钥都不用再填**。
+function agent_call_prism(p, prompt)
+    local mn = tostring(p.label or "")
+    if mn=="" then mn=tostring(p.model_id or "") end
+    if mn=="" then return false,"这个模型没有名字" end
+    local payload=http.json_encode({
+        model_name = mn,
+        mode = "chat",
+        plugin_id = "ds_ai_agent",
+        session_name = "agent_"..tostring(util.timestamp()),
+        messages = {{role="user", content=tostring(prompt or "")}},
+    })
+    local ok,res = pcall(http.post, AGENT_PRISM_API.."/api/ai/chat", payload, {
+        headers={["Content-Type"]="application/json"}, timeout=120,
+    })
+    if not ok then return false,"请求失败："..tostring(res) end
+    local body = type(res)=="table" and (res.body or res.text) or tostring(res)
+    local st = type(res)=="table" and tonumber(res.status) or nil
+    if st and st>=400 then return false,"HTTP "..st.."："..tostring(body):sub(1,160) end
+    local txt = agent_parse_sse(body)
+    if trim(txt)=="" then
+        -- 不是流式的？那就当普通 JSON 再试一次
+        local ok2,d = pcall(http.json_decode, body)
+        if ok2 and type(d)=="table" then
+            if d.error then return false,tostring(d.error) end
+            local ch=d.choices and d.choices[1]
+            txt = ch and ((ch.message and ch.message.content) or ch.text) or ""
+        end
+    end
+    if trim(txt)=="" then return false,"模型没返回内容："..tostring(body):sub(1,160) end
+    return true,txt
+end
+
+-- 调 OpenAI 兼容接口；失败时把原因说清楚，好让人知道是该重选还是该配
+function agent_call(p, prompt)
+    -- AI帮写 已配的模型 → 走 Prism 自己的通道，不用密钥
+    if p.kind=="prism" then return agent_call_prism(p, prompt) end
+    local url=agent_api_url(p.base_url)
+    if url=="" then return false,"这个选项还没配接口地址" end
+    local payload=http.json_encode({
+        model=tostring(p.model_id or ""),
+        messages={{role="user",content=tostring(prompt or "")}},
+        stream=false,
+    })
+    local ok,res = pcall(http.post, url, payload, {
+        headers={["Content-Type"]="application/json",
+                 ["Authorization"]="Bearer "..tostring(p.api_key or "")},
+        timeout=90,
+    })
+    if not ok then return false,"请求失败："..tostring(res) end
+    local status = type(res)=="table" and tonumber(res.status) or nil
+    local body = type(res)=="table" and (res.body or res.text) or tostring(res)
+    local ok2,d = pcall(http.json_decode, body)
+    if not ok2 or type(d)~="table" then
+        return false,(status and ("HTTP "..status.." ") or "").."返回不是 JSON："..tostring(body):sub(1,160)
+    end
+    if d.error then return false,"接口报错："..tostring(d.error.message or d.error) end
+    local ch = d.choices and d.choices[1]
+    local txt = ch and ((ch.message and ch.message.content) or ch.text) or nil
+    if txt==nil or tostring(txt)=="" then
+        return false,"模型没返回内容："..tostring(body):sub(1,160)
+    end
+    return true,tostring(txt)
+end
+
+-- MC 聊天框单行有长度上限，长回复要切段
+function agent_send_long(name, text)
+    text=tostring(text or "")
+    local lines={}
+    for l in tostring(text):gmatch("[^\r\n]+") do lines[#lines+1]=l end
+    if #lines==0 then lines={text} end
+    local buf=""; local sent=0
+    local function flush()
+        if buf~="" and sent<6 then send(name,buf); sent=sent+1; buf="" end
+    end
+    for _,l in ipairs(lines) do
+        if #buf + #l + 1 > 180 then flush() end
+        buf = (buf=="" and l) or (buf.."\n"..l)
+    end
+    flush()
+    if sent>=6 then send(name,"§7（回复过长，已截断）") end
+end
+
+-- 显示选择菜单
+function agent_show_menu(name)
+    local list=agent_all_options()
+    if #list==0 then
+        send(name,"§c一个可选的 AI 都没有。\n§7Prism 的 AI帮写 里至少配一个模型（本机 /api/ai/models 要有数据）。")
+        return true
+    end
+    local pick=agent_load_pick()
+    local lines={}
+    for i,o in ipairs(list) do
+        local mark = o.ready and "§a●" or "§7○"
+        local src  = (o.kind=="prism") and "§8★AI帮写已配" or (o.ready and "§8自定义" or "§8未配置")
+        local cur  = (pick and ((o.kind=="prism" and pick.model_id==o.model_id)
+                      or (o.kind=="custom" and pick.slot==o.slot))) and " §b←当前" or ""
+        lines[#lines+1]=string.format("§f%d. %s §f%s  %s%s", i, mark, o.label, src, cur)
+    end
+    send(name,"§b━━ AI Agent 选择 ━━\n"..table.concat(lines,"\n")
+        .."\n§e输入编号选择；§f.stop §7退出"
+        .."\n§7○ 灰的 = 还没配，用 §f.Agent 配置 编号 <接口地址> <密钥> <模型名>")
+    return true
+end
+
+-- 选一个
+function agent_pick(name, idx)
+    local list=agent_all_options()
+    local o=list[tonumber(idx) or 0]
+    if not o then send(name,"§c没有这个编号。用 §f.Agent 选择 §c重新看。"); return true end
+    if not o.ready then
+        send(name,"§e「"..tostring(o.label).."」还没配好。\n§7用法：§f.Agent 配置 "..idx.." <接口地址> <密钥> <模型名>\n§7例：§f.Agent 配置 4 https://api.deepseek.com sk-xxx deepseek-chat")
+        return true
+    end
+    local rec = (o.kind=="prism")
+        and {kind="prism", model_id=o.model_id, label=o.label}
+        or  {kind="custom", slot=o.slot, label=o.label}
+    agent_save_pick(rec)
+    send(name,"§a已选择：§b"..tostring(o.label)
+        .."\n§7以后在聊天框输入 §f.AI agent 要说的话 §7就用它。\n§7想换随时 §f.Agent 选择")
+    return true
+end
+
+-- 给自定义槽填 API
+function agent_config(name, idx, base_url, api_key, model_id)
+    local list=agent_all_options()
+    local o=list[tonumber(idx) or 0]
+    if not o then send(name,"§c没有这个编号。"); return true end
+    if o.kind~="custom" then send(name,"§c只有前 4 个自定义槽能配置；AI帮写已配的在 Prism 里改。"); return true end
+    if base_url=="" or api_key=="" then
+        send(name,"§e用法：§f.Agent 配置 "..idx.." <接口地址> <密钥> <模型名>\n§7例：§f.Agent 配置 4 https://api.deepseek.com sk-xxx deepseek-chat")
+        return true
+    end
+    local c=agent_load_custom()
+    c[o.slot]={base_url=base_url, api_key=api_key, model_id=(model_id~="" and model_id or "gpt-4o-mini"), label=o.label}
+    local ok,err=agent_save_custom(c)
+    if not ok then send(name,"§c保存失败："..tostring(err)); return true end
+    send(name,"§a已配置 §b"..tostring(o.label).."§a。\n§7用 §f.Agent 选择 §7再选一次就能用了。")
+    return true
+end
+
+-- 用当前选中的模型回答
+function agent_ask(name, text)
+    if trim(tostring(text or ""))=="" then
+        send(name,"§e用法：§f.AI agent 你想问的话\n§7先 §f.Agent 选择 §7挑一个模型；当前："..tostring((agent_load_pick() or {}).label or "未选择"))
+        return true
+    end
+    local p=agent_resolve()
+    if not p then
+        send(name,"§e之前选的模型现在用不了了（可能被删或改了配置）。\n§7输入 §f.Agent 选择 §7重新挑一个。")
+        return true
+    end
+    send(name,"§7["..tostring(p.label).."] 思考中…")
+    local ok,ans=agent_call(p,text)
+    if not ok then
+        send(name,"§c调用失败："..tostring(ans).."\n§7换个模型试试：§f.Agent 选择")
+        return true
+    end
+    agent_log_chat(name, p.label, text, ans)
+    agent_send_long(name,"§b["..tostring(p.label).."]§f "..ans)
+    return true
+end
+
+-- 问答留痕：存最近 30 条，方便回看 / 排查
+function agent_log_file() return game.dataDir().."/agent_chat_log.json" end
+function agent_log_chat(name, label, ask, ans)
+    local ok,arr = pcall(util.json_load, agent_log_file())
+    if not ok or type(arr)~="table" then arr={} end
+    arr[#arr+1] = {at=util.timestamp(), player=tostring(name or ""),
+                   model=tostring(label or ""), q=tostring(ask or ""),
+                   a=tostring(ans or ""):sub(1,4000)}
+    while #arr > 30 do table.remove(arr,1) end
+    pcall(util.json_write, agent_log_file(), arr)
+end
+
 function ai_agent_forward(name, text, agent_no)
     local key = ai_agent_bridge_key()
     if key == "" then return false, "未设置密钥（.AIAgent密钥 <平台密钥>）" end
@@ -4244,6 +4540,9 @@ function show_trigger_words(name,page)
         ".积分版 计分板名称",".scoreboard 计分板名称",".积分 玩家",
         -- AI
         "AI 内容（公开AI）","ai 内容（私聊AI）","指令 内容（指令Agent）","AI Agent 内容（转发外部AI）",
+        -- ★ AI Agent 供应商选择（复用 AI帮写 里已配的 API，不用再填密钥）
+        ".Agent 选择","输入编号（选中 AI Agent）",".Agent 配置 编号 接口地址 密钥 模型名",
+        ".Agent 当前",".AI agent 内容（用选中的模型回答）",".aiagent 内容",
         ".AI模型 Flash/V4 Pro",".AI切换 Flash/V4 Pro",".ai模型当前",".ai状态",".ai诊断",
         ".AI设定 内容",".ai设定 清除",".AI 修改所有AI设定 内容",".全服AI设定",
         ".全服AI设定 删除 编号",".AI 删除所有AI设定 编号",".AI 移除所有AI设定 编号",
@@ -5064,6 +5363,18 @@ function handle_menu(name, msg)
             show_gameplay_categories(name)
         end
         return true
+    end
+
+    -- ★ AI Agent 选择菜单：输编号选中，.stop 退出
+    if mode == "agent_pick" then
+        if msg==".stop" or low=="stop" or msg=="退出" or msg=="0" then
+            clear_menu(d,r); send(name,"§e已退出 AI Agent 选择。"); return true
+        end
+        if msg:match("^%d+$") then
+            local ok = agent_pick(name, msg)
+            clear_menu(d,r); return ok
+        end
+        send(name,"§c请输入编号选择（§f.Agent 选择 §c重新看列表，§f.stop §c退出）。"); return true
     end
 
     if mode == "market14_main" then
@@ -6634,6 +6945,36 @@ function on_chat(playerName, msg)
         end
     end
     if low==".aiagent状态" then ai_agent_bridge_status(playerName); return end
+    -- ★ AI Agent 供应商选择：.Agent 选择 / .AI agent 内容
+    --   不新增密钥 —— AI帮写 里已配的 API 直接列出来用
+    if low==".agent 选择" or low==".agent选择" or low==".agent 选" or low==".agent" then
+        if not is_admin(playerName) then send(playerName,"§c只有管理权限可以选择 AI Agent。"); return end
+        local pd,pr = player_record(playerName,true)
+        set_menu(pd,pr,"agent_pick"); save_data(pd)
+        return agent_show_menu(playerName)
+    end
+    if low==".agent 当前" or low==".agent当前" then
+        local p=agent_resolve()
+        if p then send(playerName,"§b当前 AI Agent：§f"..tostring(p.label).."\n§7接口："..tostring(agent_api_url(p.base_url)).."\n§7模型："..tostring(p.model_id))
+        else send(playerName,"§e还没选，或之前选的已失效。输入 §f.Agent 选择") end
+        return
+    end
+    do
+        local idx,bu,ak,mi = msg:match("^%.[Aa]gent%s+配置%s+(%d+)%s+(%S+)%s+(%S+)%s*(.*)$")
+        if idx then
+            if not is_admin(playerName) then send(playerName,"§c只有管理权限可以配置 AI Agent。"); return end
+            return agent_config(playerName, idx, tostring(bu or ""), tostring(ak or ""), trim(mi or ""))
+        end
+    end
+    if low:sub(1,10)==".ai agent " or low==".ai agent" or low:sub(1,9)==".aiagent " or low==".aiagent" then
+        local text
+        if low:sub(1,10)==".ai agent " then text=trim(msg:sub(11))
+        elseif low:sub(1,9)==".aiagent " then text=trim(msg:sub(10))
+        else text="" end
+        if not is_admin(playerName) then send(playerName,"§c只有管理权限可以使用 AI Agent。"); return end
+        return agent_ask(playerName, text)
+    end
+
     if low==".aiagent列表" or low==".aiagent名单" or low==".aiagents" then
         if not is_admin(playerName) then send(playerName,"§c只有管理权限可以查看 AI Agent 名单。"); return end
         local ok, list = ai_agent_roster(true)
