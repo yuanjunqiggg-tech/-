@@ -29,13 +29,17 @@ import { listModels, createModel, updateModel, deleteModel, chatProxy } from './
 import { handleMcp } from './mcphttp';
 import { runOnDevice, pickDevice, streamCommandSSE } from './relay';
 import { AI_ASSIST_PARTS, buildAiAssistContext } from './aicontext';
+import { agentList, ensureInboxAgentNo, agentUpsert } from './agents';
+import {
+  pcCreateSession, pcListSessions, pcPoll, pcClaim, pcOutput, pcInput, pcMessages,
+} from './pcbridge';
 
 /**
  * 构建标记。改代码时顺手改一下这个值，
  * 就能用 GET /api/v1/__build 确认线上跑的到底是哪一版 ——
  * 排查「部署了但没生效」时省大量时间。
  */
-const BUILD_TAG = '2026-09-13-aiassist-context-v1.5';
+const BUILD_TAG = '2026-09-13-agent-roster-v1.6';
 
 export interface Env {
   DB: D1Database;
@@ -772,7 +776,7 @@ export default {
     if (path === '/api/v1/__build') {
       return ok({
         build: BUILD_TAG,
-        features: ['bot_keeper', 'prism_status', 'mcp_v1', 'ai_assist_context'],
+        features: ['bot_keeper', 'prism_status', 'mcp_v1', 'ai_assist_context', 'agent_roster'],
       });
     }
 
@@ -942,21 +946,37 @@ export default {
         const text = String(b.text ?? b.content ?? b.message ?? '').trim();
         if (!text) return fail('缺少 text', 400);
         await env.DB.prepare(INBOX_DDL).run();
+        await ensureInboxAgentNo(env.DB);
+        // agent_no：点名某号 AI（不传 = 广播给所有在线的）
+        const rawNo = parseInt(String(b.agent_no ?? b.no ?? ''), 10);
+        const agentNo = !isNaN(rawNo) && rawNo > 0 ? rawNo : null;
         await env.DB.prepare(
-          'INSERT INTO agent_inbox (player, uuid, text, created_at, read_at) VALUES (?,?,?,?,NULL)',
-        ).bind(String(b.player || ''), String(b.uuid || ''), text, Date.now()).run();
-        return ok({ delivered: true, chars: text.length });
+          'INSERT INTO agent_inbox (player, uuid, text, agent_no, created_at, read_at) VALUES (?,?,?,?,?,NULL)',
+        ).bind(String(b.player || ''), String(b.uuid || ''), text, agentNo, Date.now()).run();
+        return ok({ delivered: true, chars: text.length, agent_no: agentNo });
       }
       if (path === '/api/v1/agent/inbox' && req.method === 'GET') {
         await env.DB.prepare(INBOX_DDL).run();
+        await ensureInboxAgentNo(env.DB);
         const unread = url.searchParams.get('unread') === '1';
         const limit = Math.min(
           Math.max(parseInt(url.searchParams.get('limit') || '20', 10) || 20, 1), 100,
         );
+        const rawNo = parseInt(url.searchParams.get('agent_no') || '', 10);
+        const agentNo = !isNaN(rawNo) && rawNo > 0 ? rawNo : null;
+        let where = '';
+        const binds: any[] = [];
+        if (agentNo) {
+          where = 'WHERE (agent_no IS NULL OR agent_no = ?)';
+          binds.push(agentNo);
+        }
+        if (unread) {
+          where += where ? ' AND read_at IS NULL' : 'WHERE read_at IS NULL';
+        }
         const r = await env.DB.prepare(
-          `SELECT id, player, uuid, text, created_at, read_at FROM agent_inbox
-           ${unread ? 'WHERE read_at IS NULL' : ''} ORDER BY id DESC LIMIT ?`,
-        ).bind(limit).all<any>();
+          `SELECT id, player, uuid, text, agent_no, created_at, read_at FROM agent_inbox
+           ${where} ORDER BY id DESC LIMIT ?`,
+        ).bind(...binds, limit).all<any>();
         // 倒序取回来再翻正，让 AI 按「先说先到」的顺序读
         return ok({ messages: (r.results || []).slice().reverse() });
       }
@@ -973,6 +993,85 @@ export default {
           await env.DB.prepare('UPDATE agent_inbox SET read_at=? WHERE id=?').bind(now, id).run();
         }
         return ok({ marked: ids.length });
+      }
+
+      // --------------------------------------------------------
+      // ★ AI Agent 注册表 —— 给每个能接活的 AI 一个稳定编号
+      //
+      //   GET  /api/v1/agent/registry                 列出全部（插件/手机用）
+      //   GET  /api/v1/agent/registry?only=1          只要在线的
+      //   POST /api/v1/agent/registry                 {kind,name,label,meta} 注册/心跳
+      //
+      //   编号按「第一次出现」顺序发，之后永久保留。
+      //   游戏里「AI Agent 2 xxx」= 点名 2 号；不带号 = 广播。
+      // --------------------------------------------------------
+      if (path === '/api/v1/agent/registry' && req.method === 'GET') {
+        const onlyOnline = url.searchParams.get('only') === '1';
+        const list = await agentList(env.DB, { onlyOnline });
+        return ok({ agents: list });
+      }
+      if (path === '/api/v1/agent/registry' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+        const kind = String(b.kind || 'mcp');
+        const name = String(b.name || '').trim();
+        if (!name) return fail('缺少 name', 400);
+        const me = await agentUpsert(env.DB, {
+          kind,
+          name,
+          label: String(b.label || name),
+          meta: String(b.meta || ''),
+        });
+        return ok({ no: me.no, label: me.label, is_new: me.isNew });
+      }
+
+      // --------------------------------------------------------
+      // ★ PC 桥 —— 手机上遥控电脑里跑的 AI CLI
+      //
+      //   手机：POST /api/v1/pc/sessions          {name, cli, cwd, message}  开一个
+      //         GET  /api/v1/pc/sessions                                     列出来
+      //         POST /api/v1/pc/input             {session_id, text}         追问
+      //         GET  /api/v1/pc/messages?session_id=&since=0                 看输出
+      //   电脑：POST /api/v1/pc/poll              {pc}                       领活
+      //         POST /api/v1/pc/claim             {id}                       领走
+      //         POST /api/v1/pc/output            {session_id, text, done}   回传输出
+      // --------------------------------------------------------
+      if (path === '/api/v1/pc/sessions' && req.method === 'GET') {
+        return ok({ sessions: await pcListSessions(env.DB) });
+      }
+      if (path === '/api/v1/pc/sessions' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+        return ok({ session: await pcCreateSession(env.DB, b) });
+      }
+      if (path === '/api/v1/pc/poll' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { /* 空 body 也接受 */ }
+        return ok(await pcPoll(env.DB, b));
+      }
+      if (path === '/api/v1/pc/claim' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+        try { return ok(await pcClaim(env.DB, b)); }
+        catch (e: any) { return fail(e?.message || String(e), 400); }
+      }
+      if (path === '/api/v1/pc/output' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+        try { return ok(await pcOutput(env.DB, b)); }
+        catch (e: any) { return fail(e?.message || String(e), 400); }
+      }
+      if (path === '/api/v1/pc/input' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+        try { return ok(await pcInput(env.DB, b)); }
+        catch (e: any) { return fail(e?.message || String(e), 400); }
+      }
+      if (path === '/api/v1/pc/messages' && req.method === 'GET') {
+        const sid = String(url.searchParams.get('session_id') || '').trim();
+        if (!sid) return fail('缺少 session_id', 400);
+        const since = parseInt(url.searchParams.get('since') || '0', 10) || 0;
+        return ok(await pcMessages(env.DB, sid, since));
       }
 
       // --------------------------------------------------------

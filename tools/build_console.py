@@ -59,8 +59,10 @@ def main():
     out = args.out if os.path.isabs(args.out) else os.path.join(ROOT, args.out)
     os.makedirs(out, exist_ok=True)
 
+    # ★ 控制台主页面早已从 console.html 换成 index.html（含抓包/设备/模型/AI接入/名单等全部页面）。
+    #   这里必须跟着改，否则 Pages 上跑的还是几小时前的旧版。
     pairs = [
-        ("console.html", "index.html"),
+        ("index.html", "index.html"),
         ("agent.html", "agent.html"),
     ]
 

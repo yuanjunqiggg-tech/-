@@ -4129,13 +4129,46 @@ function ai_agent_bridge_status(name)
     send(name,"§b━━ AI Agent 通道 ━━\n§f状态：§"..(ai_agent_bridge_ready() and "a已接通" or "c未设置密钥").."\n§f目标：§7"..AI_AGENT_BRIDGE_URL.."\n§f设置者：§7"..by.."\n§f设置时间：§7"..at.."\n§e用法：§fAI Agent 你想说的话")
     return true
 end
-function ai_agent_forward(name, text)
+-- ★ AI Agent 名单（编号 → 名字），从云端 /api/v1/agent/registry 拉，本地缓存 30 秒。
+--   有了它管理员才能在聊天框点名：「AI Agent 2 帮我改价」= 只发给 2 号。
+AI_AGENT_ROSTER_CACHE = { at = 0, list = {} }
+function ai_agent_roster_url() return AI_AGENT_BRIDGE_URL:gsub("/agent/inbox$", "/agent/registry") end
+function ai_agent_roster(force)
+    local now = util.timestamp()
+    if not force and AI_AGENT_ROSTER_CACHE.list and #AI_AGENT_ROSTER_CACHE.list > 0
+       and now - (AI_AGENT_ROSTER_CACHE.at or 0) < 30 then
+        return true, AI_AGENT_ROSTER_CACHE.list
+    end
     local key = ai_agent_bridge_key()
     if key == "" then return false, "未设置密钥（.AIAgent密钥 <平台密钥>）" end
+    local ok, res = pcall(http.get, ai_agent_roster_url(), {
+        headers = { ['X-Ds-Key'] = key }, timeout = 8,
+    })
+    if not ok then return false, tostring(res) end
+    local body = type(res)=="table" and (res.body or res.text) or tostring(res)
+    local ok2, d = pcall(http.json_decode, body)
+    if not ok2 or type(d)~="table" then return false, "解析名单失败" end
+    local list = (d.data or {}).agents or d.agents or {}
+    if type(list)~="table" then list = {} end
+    AI_AGENT_ROSTER_CACHE = { at = now, list = list }
+    return true, list
+end
+function ai_agent_no_of(list, n)
+    for _, a in ipairs(list or {}) do
+        if tonumber(a.no) == tonumber(n) then return a end
+    end
+    return nil
+end
+
+function ai_agent_forward(name, text, agent_no)
+    local key = ai_agent_bridge_key()
+    if key == "" then return false, "未设置密钥（.AIAgent密钥 <平台密钥>）" end
+    local n = tonumber(agent_no)
     local payload = http.json_encode({
         player = tostring(name),
         uuid = tostring(uuid_key(name) or ""),
         text = tostring(text or ""),
+        agent_no = (n and n > 0) and n or nil,
         at = util.timestamp(),
     })
     local ok, res = pcall(http.post, AI_AGENT_BRIDGE_URL, payload, {
@@ -6601,6 +6634,27 @@ function on_chat(playerName, msg)
         end
     end
     if low==".aiagent状态" then ai_agent_bridge_status(playerName); return end
+    if low==".aiagent列表" or low==".aiagent名单" or low==".aiagents" then
+        if not is_admin(playerName) then send(playerName,"§c只有管理权限可以查看 AI Agent 名单。"); return end
+        local ok, list = ai_agent_roster(true)
+        if not ok then
+            send(playerName,"§c拉取名次失败："..tostring(list).."\n§7请确认已设置：§f.AIAgent密钥 <平台密钥>"); return
+        end
+        if #list == 0 then
+            send(playerName,"§e当前还没有任何 AI Agent 登记过。\n§7让 AI 在它的 MCP 网址后面加 §f&agent=<名字> §7再连一次，就会出现在这里。\n§7没有外部 AI 时，云端配好的模型（强大的GPT / DeepSeek 等）也会列出来供点名。"); return
+        end
+        local kind_cn = { mcp="外部AI", model="模型", pc="电脑CLI" }
+        local lines = {}
+        for _, a in ipairs(list) do
+            local mark = a.online and "§a●" or "§7○"
+            local kind = kind_cn[tostring(a.kind or "")] or tostring(a.kind or "?")
+            table.insert(lines, "§f"..tostring(a.no)..". "..mark.." §f"..tostring(a.label or a.name)
+                .."  §8["..kind.."]"..(a.online and "" or " §7离线"))
+        end
+        send(playerName,"§b━━ AI Agent 名单 ━━\n"..table.concat(lines,"\n")
+            .."\n§e点名：§fAI Agent 编号 要说的话\n§e广播：§fAI Agent 要说的话\n§8（○ 离线：点了名也没人接）")
+        return
+    end
 
 
     -- ★ 外部 AI Agent 入口：管理员在聊天框说「AI Agent 内容」→ 原样转发到云端收件箱。
@@ -6609,13 +6663,48 @@ function on_chat(playerName, msg)
     if low:sub(1, 9) == "ai agent " or low == "ai agent" then
         local text = trim(msg:sub(10))
         if text == "" then
-            send(playerName,"§b━━ AI Agent 通道 ━━\n§e用法：§fAI Agent 你想说的话\n§7例：§fAI Agent 把系统商店里编号 3 的商品删掉\n§f状态：§"..(ai_agent_bridge_ready() and "a已接通" or "c未设置密钥，请先 .AIAgent密钥 <平台密钥>"))
+            send(playerName,"§b━━ AI Agent 通道 ━━\n§e用法：§fAI Agent 你想说的话 §7（广播给所有在线的）\n§e点名：§fAI Agent 2 你想说的话 §7（只发给 2 号）\n§e看名单：§f.AIAgent列表\n§f状态：§"..(ai_agent_bridge_ready() and "a已接通" or "c未设置密钥，请先 .AIAgent密钥 <平台密钥>"))
             return
         end
         if not is_admin(playerName) then send(playerName,"§c只有管理权限可以使用 AI Agent 通道。"); return end
-        local fok, ferr = ai_agent_forward(playerName, text)
+
+        -- ★ 解析开头的编号：「AI Agent 2 帮我改价」→ no=2, text="帮我改价"
+        local no, rest = text:match("^(%d+)%s+(.+)$")
+        local target_label = nil
+        if no then
+            no = tonumber(no); text = trim(rest)
+        else
+            -- 也允许「AI Agent 2」这种只给编号、内容在下一句的形式（这里当空内容处理）
+            local only = text:match("^(%d+)$")
+            if only then
+                no = tonumber(only); text = trim(msg:match("^AI%s+Agent%s+%d+%s*(.-)$") or "")
+            end
+        end
+        if no and text == "" then
+            send(playerName,"§e要点名就顺便把话说完：§fAI Agent "..no.." 你想让它做什么\n§7只查名单用：§f.AIAgent列表")
+            return
+        end
+        if no then
+            local rok, rlist = ai_agent_roster()
+            if rok then
+                local a = ai_agent_no_of(rlist, no)
+                if not a then
+                    send(playerName,"§c没有 "..no.." 号 AI Agent。用 §f.AIAgent列表 §c看当前有哪些。"); return
+                end
+                if a.online == false then
+                    send(playerName,"§e"..no.." 号（"..tostring(a.label or a.name).."）现在不在线，消息可能没人接。\n§7仍要发送请改用不带编号的广播，或用 §f.AIAgent列表 §7挑一个在线的。"); return
+                end
+                target_label = tostring(a.label or a.name)
+            end
+        end
+
+        local fok, ferr = ai_agent_forward(playerName, text, no)
         if fok then
-            send(playerName,"§a已转发给 AI Agent：\n§f"..text.."\n§7等待外部 Agent 决断，结果会直接回到游戏里。")
+            if no then
+                send(playerName,"§a已转发给 §b"..no.." 号 "..tostring(target_label or "AI").."§a：\n§f"..text.."\n§7其它 AI 不会收到这条，等它回话。")
+            else
+                send(playerName,"§a已广播给所有在线 AI Agent：\n§f"..text.."\n§7谁先接是谁的；想指定用 §fAI Agent 编号 内容")
+            end
         else
             send(playerName,"§c转发失败："..tostring(ferr).."\n§7请确认已设置：§f.AIAgent密钥 <平台密钥>")
         end

@@ -18,6 +18,7 @@
 import { runOnDevice, pickDevice } from './relay';
 import { listModels, chatProxy } from './models';
 import { buildAiAssistContext, CAPABILITY_MANIFEST } from './aicontext';
+import { agentUpsert, agentList, agentRosterText, ensureInboxAgentNo } from './agents';
 
 export const MCP_PROTOCOL_VERSION = '2024-11-05';
 export const MCP_SERVER_INFO = { name: 'prism-remote', version: '1.0.0' };
@@ -316,6 +317,22 @@ const TOOLS: any[] = [
       required: [],
     },
   },
+  {
+    name: 'agent_me',
+    description:
+      '★ 查「我是几号、现在还有谁在线」。\n' +
+      '\n' +
+      '多人协作时管理员会在游戏里点名：\n' +
+      '  「AI Agent 2 把钻石剑降到 50 积分」→ 只有 2 号该动手，其它号请无视。\n' +
+      '  「AI Agent 把钻石剑降价」（不带号）  → 广播，所有在线的都能接。\n' +
+      '\n' +
+      'agent_inbox 已经自动帮你按号码过滤过了（只给你「没点名」和「点名你」的消息），\n' +
+      '所以正常流程是：调 agent_me 认领身份 → 调 agent_inbox 收活 → prism_rest 干活。\n' +
+      '\n' +
+      '如果你发现自己没有编号，说明 MCP 网址里没带 &agent=<名字>，\n' +
+      '让管理员把网址改成 https://ai-api.youyuanqi.dpdns.org/mcp?key=<密钥>&agent=codex 再重连。',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
 ];
 
 // ------------------------------------------------------------
@@ -336,7 +353,12 @@ function rpcErr(id: any, code: number, message: string, data?: any) {
 // ------------------------------------------------------------
 // 工具实现
 // ------------------------------------------------------------
-async function callTool(env: any, name: string, args: any): Promise<any> {
+async function callTool(
+  env: any,
+  name: string,
+  args: any,
+  me?: { no: number; label: string } | null,
+): Promise<any> {
   const db: D1Database = env.DB;
   const a = args || {};
 
@@ -568,6 +590,7 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
       created_at INTEGER, read_at INTEGER
     )`;
     await db.prepare(INBOX_DDL).run();
+    await ensureInboxAgentNo(db);
 
     const action = String(a.action || 'list').toLowerCase();
 
@@ -585,18 +608,36 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
 
     const unread = a.unread === true || a.unread === 1 || a.unread === '1';
     const limit = Math.min(Math.max(parseInt(String(a.limit ?? 20), 10) || 20, 1), 100);
+
+    // ★ 点名过滤：只收「广播」和「点名我」的。
+    //   没编号的客户端只收广播，避免几个 AI 抢同一件活。
+    const myNo = me?.no ? Number(me.no) : null;
+    let where = '';
+    const binds: any[] = [];
+    if (myNo) {
+      where = '(agent_no IS NULL OR agent_no = ?)';
+      binds.push(myNo);
+    } else {
+      where = 'agent_no IS NULL';
+    }
+    if (unread) where += ' AND read_at IS NULL';
+
     const r = await db.prepare(
-      `SELECT id, player, uuid, text, created_at, read_at FROM agent_inbox
-       ${unread ? 'WHERE read_at IS NULL' : ''} ORDER BY id DESC LIMIT ?`,
-    ).bind(limit).all<any>();
+      `SELECT id, player, uuid, text, agent_no, created_at, read_at FROM agent_inbox
+       WHERE ${where} ORDER BY id DESC LIMIT ?`,
+    ).bind(...binds, limit).all<any>();
     const msgs: any[] = (r.results || []).slice().reverse();
 
+    const who = myNo ? `你是 ${myNo} 号（${me?.label || '?'}）` : '你还没有编号（只收广播消息）';
     if (!msgs.length) {
       const tail = unread ? '（没有未读）' : '';
       return {
         content: [{
           type: 'text',
-          text: `收件箱是空的${tail}。\n管理员在游戏聊天框输入「AI Agent 你想说的话」就能发到这里。\n前提：插件里已用 .AIAgent密钥 <平台密钥> 接通通道。`,
+          text: `收件箱是空的${tail}。${who}。\n`
+            + '管理员在游戏聊天框输入「AI Agent 你想说的话」是广播；\n'
+            + `输入「AI Agent ${myNo || 'N'} 你想说的话」是点名找你。\n`
+            + '前提：插件里已用 .AIAgent密钥 <平台密钥> 接通通道。',
         }],
       };
     }
@@ -604,16 +645,27 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
     const lines = msgs.map((m: any) => {
       const t = new Date(m.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
       const flag = m.read_at ? '  ' : '● ';
-      return `${flag}#${m.id}  [${t}]  ${m.player || '?'}：${m.text}`;
+      const tag = m.agent_no ? `[点名 ${m.agent_no} 号]` : '[广播]';
+      return `${flag}#${m.id}  ${tag} [${t}]  ${m.player || '?'}：${m.text}`;
     });
     return {
       content: [{
         type: 'text',
-        text: `收到 ${msgs.length} 条（● = 未读）：\n\n${lines.join('\n')}\n\n`
+        text: `${who}，收到 ${msgs.length} 条（● = 未读）：\n\n${lines.join('\n')}\n\n`
           + '处理完用 action=read 把这几条标记已读，避免重复处理。\n'
           + '回话走 prism_rest POST /api/bot/console：指令加斜杠，聊天不加。',
       }],
     };
+  }
+
+  if (name === 'agent_me') {
+    let list: any[] = [];
+    try {
+      list = await agentList(env.DB, { onlyOnline: true });
+    } catch (e: any) {
+      return { content: [{ type: 'text', text: `读取注册表失败：${e?.message || e}` }], isError: true };
+    }
+    return { content: [{ type: 'text', text: agentRosterText(list, me || null) }] };
   }
 
   throw new Error(`未知工具：${name}`);
@@ -669,9 +721,44 @@ export async function handleMcp(req: Request, env: any): Promise<Response> {
 
   const { id, method, params } = msg || {};
 
+  // ★ 识别「你是谁」：优先网址上的 &agent=，退回 MCP 客户端自报的 clientInfo.name。
+  //   有了名字才能领编号；管理员在游戏里说「AI Agent 2 xxx」就是点名 2 号。
+  const reqUrl = new URL(req.url);
+  const agentName = String(
+    reqUrl.searchParams.get('agent') || params?.clientInfo?.name || '',
+  ).trim();
+
+  async function resolveMe(): Promise<{ no: number; label: string } | null> {
+    if (!agentName) return null;
+    try {
+      const me = await agentUpsert(env.DB, { kind: 'mcp', name: agentName });
+      return { no: me.no, label: me.label };
+    } catch {
+      return null;
+    }
+  }
+
   try {
     switch (method) {
-      case 'initialize':
+      case 'initialize': {
+        const me = await resolveMe();
+        let roster: string;
+        if (me) {
+          let list: any[] = [];
+          try {
+            list = await agentList(env.DB, { onlyOnline: true });
+          } catch {
+            list = [];
+          }
+          roster = '\n\n' + '─'.repeat(40) + '\n' + agentRosterText(list, me);
+        } else {
+          roster =
+            '\n\n' +
+            '─'.repeat(40) +
+            '\n★ 你还没有编号。让管理员把 MCP 网址改成：\n' +
+            '  https://ai-api.youyuanqi.dpdns.org/mcp?key=<密钥>&agent=<你的名字>\n' +
+            '  （例如 &agent=codex）重连后你就是 1 号，管理员在游戏里输「AI Agent 1 xxx」就能点名找你。';
+        }
         return rpc(id, {
           protocolVersion: MCP_PROTOCOL_VERSION,
           serverInfo: MCP_SERVER_INFO,
@@ -681,8 +768,10 @@ export async function handleMcp(req: Request, env: any): Promise<Response> {
             '\n\n（上面是你的完整能力清单。' +
             '核心通道：prism_rest = 直接打 Prism 本机接口，你就是执行者，权限最高；' +
             'prism_tool = 调 29 个内置工具，中间隔一层 AI 会拒绝执行，不推荐；' +
-            '要写插件先调 ai_assist_context part=skills / part=plugin_doc。）',
+            '要写插件先调 ai_assist_context part=skills / part=plugin_doc。）' +
+            roster,
         });
+      }
 
       case 'notifications/initialized':
       case 'initialized':
@@ -699,7 +788,9 @@ export async function handleMcp(req: Request, env: any): Promise<Response> {
         const targs = params?.arguments || {};
         if (!tname) return rpcErr(id, -32602, '缺少 params.name');
         try {
-          const out = await callTool(env, tname, targs);
+          // 每次工具调用都当一次心跳（只在带 &agent= 时），顺带把身份传下去
+          const me = await resolveMe();
+          const out = await callTool(env, tname, targs, me);
           return rpc(id, out);
         } catch (e: any) {
           return rpc(id, {
