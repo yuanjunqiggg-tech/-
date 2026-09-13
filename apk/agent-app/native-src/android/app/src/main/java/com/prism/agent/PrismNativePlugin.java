@@ -253,6 +253,50 @@ public class PrismNativePlugin extends Plugin {
         });
     }
 
+    /**
+     * 把 WebView 里注册到的设备凭据交给原生层，并立刻开起原生轮询。
+     *
+     * JS 在 /device/register 成功后调这个。没有它，AgentService 里的
+     * NativePoller 不知道 device_id/token，就只能干等。
+     */
+    @PluginMethod
+    public void setCredentials(final PluginCall call) {
+        try {
+            final String id = call.getString("device_id", "");
+            final String token = call.getString("token", "");
+            final String endpoint = call.getString("endpoint", "");
+            final int port = call.getInt("port", 8080);
+            final String name = call.getString("name", "");
+
+            if (id == null || id.isEmpty() || token == null || token.isEmpty()) {
+                call.reject("缺少 device_id 或 token");
+                return;
+            }
+
+            AgentPrefs.setCredentials(getContext(), id, token, endpoint, port, name);
+
+            // 服务没起就顺便起一下；已起的话 NativePoller.start() 自己会忽略
+            AgentService.start(getContext());
+            NativePoller.get(getContext()).start();
+
+            JSObject o = new JSObject();
+            o.put("ok", true);
+            o.put("nativePolling", NativePoller.get(getContext()).isRunning());
+            call.resolve(o);
+        } catch (Throwable t) {
+            call.reject("保存凭据失败：" + t.getMessage());
+        }
+    }
+
+    /** 原生轮询是否在跑（给界面显示用） */
+    @PluginMethod
+    public void nativePollerState(PluginCall call) {
+        JSObject o = new JSObject();
+        o.put("running", NativePoller.get(getContext()).isRunning());
+        o.put("hasCredentials", AgentPrefs.hasCredentials(getContext()));
+        call.resolve(o);
+    }
+
     @Override
     protected void handleOnDestroy() {
         if (prismExecutor != null && !prismExecutor.isShutdown()) {

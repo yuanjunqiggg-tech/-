@@ -252,10 +252,18 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
     );
     // 被控端回传 { ok, tool, executed, result, ai_comment } —— 摊平一层，AI 更好读
     const env: any = r.result && typeof r.result === 'object' ? r.result : {};
+
+    // ★ executed 必须用严格判断。
+    //   之前写的是 `env.executed !== false`，指令根本没被执行时（比如设备离线）
+    //   env 是空对象，executed 是 undefined，`undefined !== false` 竟然是 true ——
+    //   于是「设备离线、指令压根没跑」会被报成 executed:true，
+    //   外部 AI 会以为自己成功操作了游戏，其实什么都没发生。这种错最坑。
+    const executed = env.executed === true;
+
     const flat = {
       ok: r.ok,
       tool: env.tool || a.tool_name,
-      executed: env.executed !== false,
+      executed,
       result: env.result !== undefined ? env.result : env,
       ai_comment: env.ai_comment || null,
       device_id: r.device_id,
@@ -263,6 +271,13 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
       command_id: r.command_id,
       error: r.error || null,
       timeout: !!r.timeout,
+      // 失败时给 AI 一句人话，别让它自己猜
+      hint: (!r.ok || !executed)
+        ? (r.error
+            ? ('没执行成功：' + r.error)
+            : '工具没有被执行（executed=false）。可能是 Prism 内置 AI 没有发起 tool_call，'
+              + '或工具名不在它的 29 个工具里。可以先调 prism_status 确认引擎正常。')
+        : null,
     };
     return { content: [{ type: 'text', text: JSON.stringify(flat, null, 2) }], isError: !r.ok };
   }

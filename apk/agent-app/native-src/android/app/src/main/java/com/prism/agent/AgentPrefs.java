@@ -11,9 +11,18 @@ import android.content.SharedPreferences;
  *      —— 用户会无法关闭，体验很糟）
  *   2. 保活相关的自检计数
  *
- * 注意：设备 ID / token / 网关地址这些「业务配置」存在 WebView 的
- * localStorage 里（由 agent.html 管理），不在这里重复存一份，
- * 避免两边不一致。
+ * ★ 2026-09-13 补充：设备凭据现在**也要**在这里存一份。
+ *
+ * 原因（真机踩出来的）：长轮询原本跑在 WebView 的 JS 里，云手机一锁屏或
+ * 切到后台，WebView 的定时器就被系统节流甚至整个冻住，设备立刻假死——
+ * 现象就是「控制台显示离线，指令全部超时」。
+ *
+ * 修法是把轮询挪到原生层（NativePoller 跑在 AgentService 的后台线程），
+ * 不依赖 WebView 是否存活。原生层要自己知道 device_id / token / 网关地址 /
+ * Prism 端口，所以这里必须存一份。
+ *
+ * WebView 那边的 localStorage 仍然是「配置 UI 的当前值」，
+ * 每次注册/保存都会通过 PrismNative.setCredentials() 同步过来。
  */
 public final class AgentPrefs {
 
@@ -44,5 +53,50 @@ public final class AgentPrefs {
 
     public static void setLastBoot(Context ctx, long ts) {
         sp(ctx).edit().putLong(K_LAST_BOOT, ts).apply();
+    }
+
+    // ============================================================
+    // 设备凭据（供原生层轮询使用）
+    // ============================================================
+    private static final String K_DEV_ID = "device_id";
+    private static final String K_TOKEN = "device_token";
+    private static final String K_ENDPOINT = "endpoint";
+    private static final String K_PORT = "prism_port";
+    private static final String K_DEV_NAME = "device_name";
+
+    public static void setCredentials(Context ctx, String deviceId, String token,
+                                      String endpoint, int port, String name) {
+        sp(ctx).edit()
+                .putString(K_DEV_ID, deviceId)
+                .putString(K_TOKEN, token)
+                .putString(K_ENDPOINT, endpoint)
+                .putInt(K_PORT, port)
+                .putString(K_DEV_NAME, name)
+                .apply();
+    }
+
+    public static String deviceId(Context ctx) { return sp(ctx).getString(K_DEV_ID, ""); }
+    public static String token(Context ctx) { return sp(ctx).getString(K_TOKEN, ""); }
+    public static String deviceName(Context ctx) { return sp(ctx).getString(K_DEV_NAME, ""); }
+
+    public static int prismPort(Context ctx) { return sp(ctx).getInt(K_PORT, 8080); }
+
+    /** 网关地址，已去掉结尾斜杠；没配过就返回默认那个 */
+    public static String endpoint(Context ctx) {
+        String e = sp(ctx).getString(K_ENDPOINT, "");
+        if (e == null || e.isEmpty()) e = "https://ai-api.youyuanqi.dpdns.org";
+        while (e.endsWith("/")) e = e.substring(0, e.length() - 1);
+        return e;
+    }
+
+    /** 凭据是否齐全（齐全才能开轮询） */
+    public static boolean hasCredentials(Context ctx) {
+        String id = sp(ctx).getString(K_DEV_ID, "");
+        String tk = sp(ctx).getString(K_TOKEN, "");
+        return id != null && !id.isEmpty() && tk != null && !tk.isEmpty();
+    }
+
+    public static void clearCredentials(Context ctx) {
+        sp(ctx).edit().remove(K_DEV_ID).remove(K_TOKEN).apply();
     }
 }

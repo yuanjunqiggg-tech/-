@@ -56,6 +56,12 @@ public class AgentService extends Service {
         startForegroundCompat(buildNotification());
         acquireWakeLock();
 
+        // ★ 把真正的指令循环挪到原生线程。
+        //   WebView 的 JS 定时器在云手机锁屏/切后台后会被冻住，
+        //   只靠它设备会在几分钟内假死（真机实测 3 分钟掉线）。
+        //   原生线程不受 WebView 生命周期影响。
+        NativePoller.get(this).start();
+
         Log.i(TAG, "前台服务已启动");
     }
 
@@ -85,6 +91,7 @@ public class AgentService extends Service {
     @Override
     public void onDestroy() {
         running = false;
+        NativePoller.get(this).stop();
         releaseWakeLock();
         Log.w(TAG, "前台服务被销毁");
 

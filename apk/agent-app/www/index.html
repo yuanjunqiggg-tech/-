@@ -429,6 +429,36 @@ async function prismStatus(){
 }
 
 /**
+ * 把注册到的凭据交给原生层，让它开起自己的轮询线程。
+ * 这样即使 WebView 被云手机冻住，设备也不会掉线。
+ */
+async function pushCredentialsToNative(){
+  const p = nativePlugin();
+  if(!p || !p.setCredentials){
+    log('（非 APK 环境，跳过原生轮询）', 'wn');
+    return false;
+  }
+  try{
+    const r = await p.setCredentials({
+      device_id: st.device_id,
+      token: st.token,
+      endpoint: st.api || '',
+      port: parseInt(st.prism_port || 8080),
+      name: st.device_name || '',
+    });
+    if(r && r.nativePolling){
+      log('原生轮询已接管（锁屏也不会掉线）', 'ok');
+    }else{
+      log('原生轮询已就绪', 'ok');
+    }
+    return true;
+  }catch(e){
+    log('原生轮询启动失败：' + (e.message||e), 'wn');
+    return false;
+  }
+}
+
+/**
  * 确保 Prism 引擎可用。
  * @param why 用于日志的调用原因
  * @returns {ok:boolean}
@@ -517,6 +547,12 @@ async function doBind(){
     save();
 
     log('绑定成功！设备 ID：' + st.device_id, 'ok');
+
+    // ★ 把凭据交给原生层并开起原生轮询。
+    //   云手机锁屏/切后台会冻住 WebView 的 JS 定时器（真机实测 3 分钟就掉线），
+    //   原生线程不受影响。两边同时跑也没事——服务端领指令是原子的。
+    await pushCredentialsToNative();
+
     enterRunView();
     startLoop();
 
@@ -1054,6 +1090,8 @@ async function startAgentService(){
     log('检测到已绑定设备：' + st.device_id, 'ok');
     enterRunView();
     await refreshStatus();
+    // 已绑定过就补一次：原生层可能因为重装/清数据丢了凭据
+    await pushCredentialsToNative();
     startLoop();
   }else{
     // 回填已保存的设置

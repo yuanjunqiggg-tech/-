@@ -22,6 +22,9 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.BATTERY_STATS"
         tools:ignore="ProtectedPermissions" />
+    <!-- 悬浮窗：和 Prism 一样的保活思路，能显著提高进程优先级。
+         云手机上「切后台就被回收」是最大的敌人。 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- ============================================================
          Android 11+ 包可见性
