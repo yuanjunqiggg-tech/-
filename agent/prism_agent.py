@@ -116,8 +116,15 @@ def save_state(st: dict):
 # ------------------------------------------------------------
 # HTTP 工具
 # ------------------------------------------------------------
+# ★ 必须伪装成浏览器 UA。
+#   urllib 默认发 "Python-urllib/3.x"，Cloudflare 的 WAF 会直接 403 拒绝
+#   （有时表现为 error 1010）。这不是「以防万一」——实测不加就注册不上。
+UA_BROWSER = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+
 def http(url: str, method="GET", body=None, headers=None, opener=None, timeout=60):
-    h = {"Content-Type": "application/json"}
+    h = {"Content-Type": "application/json", "User-Agent": UA_BROWSER}
     if headers:
         h.update(headers)
     data = json.dumps(body).encode("utf-8") if body is not None else None
