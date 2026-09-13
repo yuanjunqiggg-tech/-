@@ -1,6 +1,6 @@
 -- Ds AI Agent V9.4.68 · Prism 工具箱 
 -- ===== 完整备份打包（插件文件 + 配置文件 + 数据文件 一起打包）=====
-function pack_full_backup_zip()
+function pack_full_backup_zip(out_name)
     local base=plugin_base_dir()
     local cdir=base.."/插件文件/ds_ai_agent"
     local cfgdir=base.."/插件配置文件/ds_ai_agent"
@@ -32,7 +32,14 @@ function pack_full_backup_zip()
     for _,n in ipairs(data_names) do add("data/"..n, ddir.."/"..n) end
     if #files==0 then return "打包失败：没有读到任何文件。" end
     local z=zip_build(files)
-    local out="/storage/emulated/0/我的世界指令相关/ds_ai_agent_完整备份.zip"
+    -- 输出名：默认「ds_ai_agent_完整备份.zip」；
+    -- 传入 out_name 时用它命名（只给文件名会自动落到本地存储目录，给完整路径则原样使用）。
+    local out_dir="/storage/emulated/0/我的世界指令相关"
+    local out=out_dir.."/ds_ai_agent_完整备份.zip"
+    local want=trim(tostring(out_name or ""))
+    if want~="" then
+        if want:find("/",1,true) then out=want else out=out_dir.."/"..want end
+    end
     local ok,err=pcall(util.write_file,out,z)
     if not ok then return "写入失败："..tostring(err) end
     local vok,vdata=pcall(util.read_file,out)
@@ -109,6 +116,26 @@ REDEEM_TIMEOUT = 180           -- 兑换码 AI 单次任务最长 3 分钟
 TEMPERATURE = 1.0
 MAX_REPLY = 1500
 NORMAL_REPLY_MAX_CHARS = 1000
+
+-- ── 通用 AI 超时预算（秒）────────────────────────────────────
+-- ⚠️ 这几个常量必须存在：run_agent 用它计算 deadline。
+--    一旦为 nil，任何「非兑换码」的 AI 请求都会在
+--    `started_at + agent_timeout` 处抛出
+--    "cannot perform add operation between number and nil"，
+--    表现为「发 AI 消息完全没反应（连"正在思考中"都没有）」。
+--    兑换码走独立的 REDEEM_TIMEOUT，所以兑换码不受影响。
+TIMEOUT = 60                  -- 普通聊天 AI：单次任务总预算
+COMMAND_TIMEOUT = 90          -- 「指令 内容」AI：单次任务总预算
+BUILD_COMMAND_TIMEOUT = 90    -- 建筑模式：单次任务总预算
+
+-- ── 建筑模式限制 ────────────────────────────────────────────
+BUILD_HISTORY_ROUNDS = 100    -- 建筑模式对话记忆最多保留 100 轮
+BUILD_COMMANDS_PER_ROUND = 15 -- 建筑模式每轮最多真实执行 15 条指令
+BUILD_MAX_RADIUS = 64         -- 单次 /fill 端点距自身最大半径（格）
+BUILD_MAX_FILL_BLOCKS = 32768 -- 单次 /fill 最大方块数
+
+-- ── 聊天刷屏禁言等级（第 1~5 次违规禁言秒数；第 6 次起封顶 5 小时）──
+MUTE_LEVELS = {300, 900, 3600, 10800, 18000}
 REDEEM_STOP_FILE = game.dataDir() .. "/ai_stop_flags.json"
 -- 通用 AI 停止标志（落盘，不再用 RUNTIME.build_stop 内存变量）
 -- 写入格式：{"玩家名": {at=秒时间戳, reason="..."}}；run_agent 每轮检查。
@@ -2236,7 +2263,7 @@ run_agent = function(question, playerName, commandMode, windowKey, privileged_ov
     local build_mode = admin and (player_rec.ai_build_mode == true or build_intent)
     -- 兑换码 AI：单独一轮问答，不设长循环。
     local redeem_mode = (player_rec.ai_redeem_mode == true) or (opts.redeem_mode == true)
-    local agent_timeout = opts.timeout or (redeem_mode and REDEEM_TIMEOUT or (build_mode and BUILD_COMMAND_TIMEOUT or (commandMode and COMMAND_TIMEOUT or TIMEOUT)))
+    local agent_timeout = opts.timeout or (redeem_mode and REDEEM_TIMEOUT or (build_mode and BUILD_COMMAND_TIMEOUT or (commandMode and COMMAND_TIMEOUT or TIMEOUT))) or 60
     local max_rounds = opts.max_rounds or (redeem_mode and REDEEM_MAX_ROUNDS or MAX_ROUNDS)
     local cmd_limit_per_round = opts.cmd_limit or (redeem_mode and REDEEM_MAX_CMDS_PER_ROUND or nil)
     local deadline = started_at + agent_timeout
@@ -2639,7 +2666,15 @@ function market_clone_one(sx,sy,sz,tx,ty,tz)
     local cmd=string.format("clone %d %d %d %d %d %d %d %d %d replace",math.floor(sx),math.floor(sy),math.floor(sz),math.floor(sx),math.floor(sy),math.floor(sz),math.floor(tx),math.floor(ty),math.floor(tz)); local ok,res=pcall(game.isCmdSuccess,cmd); return ok and res==true,cmd
 end
 function market_clear_barrel_drop(name,x,y,z)
-    -- 玩家市场商品交易：这里只负责容器本身，绝不清理周围无关掉落物。
+    -- ★ 修 bug（2026-09-13）：这里原来是个**空函数**，只 return true 什么都不做。
+    --   后果：上架确认时用 `setblock ... air destroy` 打掉木桶，
+    --   木桶里的物品全掉在地上没人管 —— 表现就是「方块没了，东西撒一地」。
+    --   旧注释写「绝不清理周围无关掉落物」是因噎废食：
+    --   把半径收到 2 格，并且只在打掉木桶的**同一时刻**执行，
+    --   就只可能命中刚从这个木桶里掉出来的东西，不会误伤玩家脚下的其它掉落物。
+    if tonumber(x)==nil or tonumber(y)==nil or tonumber(z)==nil then return false end
+    local bx,by,bz=math.floor(x),math.floor(y),math.floor(z)
+    pcall(game.isCmdSuccess,string.format('kill @e[type=item,x=%d,y=%d,z=%d,r=2]',bx,by,bz))
     return true
 end
 
@@ -2988,7 +3023,8 @@ end
 function show_market_14(name)
     local d,r=player_record(name,true)
     set_menu(d,r,"market14_main")
-    send(name,"§b━━ 系统商店 ━━\n§f1. 购买物品\n§f2. 出售物品\n§f3. 物品购买\n§7购买物品：管理权限上架的系统商店商品。\n§7出售物品：把自己的物品按服务器固定收购价换成积分。\n§7物品购买：全物品目录，系统商店购买价统一下调40%，全部取整；下界合金块同样下调40%。\n§e输入1/2/3选择；.stop退出。\n§e提示：输入 .购物 可直接打开“物品购买”菜单。")
+    local adm=is_admin(name) and "§f4. 删除商品（管理权限）\n" or "§84. 删除商品（需要管理权限）\n"
+    send(name,"§b━━ 系统商店 ━━\n§f1. 购买物品\n§f2. 出售物品\n§f3. 物品购买\n"..adm.."§7购买物品：管理权限上架的系统商店商品。\n§7出售物品：把自己的物品按服务器固定收购价换成积分。\n§7物品购买：全物品目录，系统商店购买价统一下调40%，全部取整；下界合金块同样下调40%。\n§7删除商品：管理权限移除已上架的系统商店商品（含售罄的）。\n§e输入1/2/3/4选择；.stop退出。\n§e提示：输入 .购物 可直接打开“物品购买”菜单。")
 end
 function show_sell_price_list(name,page)
     local prices=sell_price_data(); local arr={}; for id,v in pairs(prices) do table.insert(arr,{id=id,price=tonumber(v.price or v)or 0,name=v.name,order=tonumber(v.order) or 999999,damage=tonumber(v.damage or 0) or 0}) end
@@ -3251,10 +3287,61 @@ end
 function fixed_shop_show(name,page)
     local a=fixed_shop_list(); local per=8; local maxp=math.max(1,math.ceil(#a/per)); page=math.max(1,math.min(tonumber(page) or 1,maxp))
     local first=(page-1)*per+1; local last=math.min(#a,first+per-1); local lines={"§b━━ 系统商店 ━━","§7第 "..page.." / "..maxp.." 页"}
-    if #a==0 then table.insert(lines,"§e当前没有可购买商品。") else for i=first,last do local v=a[i]; table.insert(lines,string.format("§f%d. §e%s §7| §6%s积分 §7| 剩余§a%s",i-first+1,tostring(v.name),tostring(v.price),tostring(v.remaining or 0))) end end
+    if #a==0 then
+        table.insert(lines,"§e当前没有可购买商品。")
+        table.insert(lines,"§7管理员还没有上架过物品。")
+        table.insert(lines,"§b管理员在聊天框输入 §e.出售物品 §b即可上架。")
+    else for i=first,last do local v=a[i]; table.insert(lines,string.format("§f%d. §e%s §7| §6%s积分 §7| 剩余§a%s",i-first+1,tostring(v.name),tostring(v.price),tostring(v.remaining or 0))) end end
     table.insert(lines,"§7输入序号选择；§f+/-§7翻页；.stop退出。")
     local d,r=player_record(name,true); set_menu(d,r,"fixed_shop_buy",{fixed_shop_list=a,fixed_shop_page=page,fixed_shop_max_page=maxp}); send(name,table.concat(lines,"\n"))
 end
+-- ── 删除商品（系统商店第 4 项，管理权限）──────────────────────────
+-- 为什么要有这个：上架走的是 .出售物品 的多步向导（商品名 → 价格 → 次数 → 木桶坐标），
+-- 一旦开始就只能一路走到 fixed_shop_finish 落库，**中途没有「算了不要了」的出口**；
+-- 商品加错了也只能在 fixed_shop.json 里手改。这里是正规的删除入口。
+function fixed_shop_all_list()
+    local d=fixed_shop_db(); local a={}
+    for _,v in pairs(d.items or {}) do
+        v.max_purchases=math.floor(tonumber(v.max_purchases or v.limit or v.remaining or 0) or 0)
+        v.remaining=tonumber(v.remaining or v.max_purchases) or 0
+        table.insert(a,v)
+    end
+    table.sort(a,function(x,y)return (tonumber(x.id) or 0)<(tonumber(y.id) or 0) end)
+    return a
+end
+function fixed_shop_delete_list(name,page)
+    if not is_admin(name) then send(name,"§c只有管理权限可以删除系统商店商品。"); return true end
+    local a=fixed_shop_all_list()
+    if #a==0 then
+        local d,r=player_record(name,true); clear_menu(d,r); save_data(d)
+        send(name,"§e系统商店当前没有任何商品可删除。"); return true
+    end
+    local per=8; local maxp=math.max(1,math.ceil(#a/per)); page=math.max(1,math.min(tonumber(page) or 1,maxp))
+    local first=(page-1)*per+1; local last=math.min(#a,first+per-1)
+    local lines={"§b━━ 删除系统商店商品 ━━","§7第 "..page.." / "..maxp.." 页"}
+    for i=first,last do
+        local v=a[i]; local sold=(tonumber(v.remaining or 0) or 0)<=0
+        table.insert(lines,string.format("§f%d. §e%s §7| §6%s积分 §7| 剩余§a%s%s",
+            i-first+1,tostring(v.name),tostring(v.price),tostring(v.remaining or 0),sold and " §c(售罄)" or ""))
+    end
+    table.insert(lines,"§e输入序号删除对应商品；§f+/-§7翻页；§f.stop§7退出。")
+    local d,r=player_record(name,true)
+    set_menu(d,r,"fixed_shop_delete",{fixed_shop_del_list=a,fixed_shop_del_page=page,fixed_shop_del_max_page=maxp})
+    send(name,table.concat(lines,"\n")); return true
+end
+function fixed_shop_delete_do(name,id)
+    if not is_admin(name) then send(name,"§c只有管理权限可以删除系统商店商品。"); return true end
+    local db=fixed_shop_db(); local v=db.items[tostring(id)]
+    if not v then send(name,"§c编号 "..tostring(id).." 不存在。"); return true end
+    db.items[tostring(id)]=nil
+    local ok,err=fixed_shop_save(db)
+    if not ok then send(name,"§c删除失败："..tostring(err)); return true end
+    local d,r=player_record(name,true); clear_menu(d,r); save_data(d)
+    pcall(append_json_log,SHOP_LOG_FILE,{at=util.timestamp(),type="系统商店删除商品",operator=name,id=tostring(id),name=v.name,price=v.price})
+    send(name,"§a已删除系统商店商品：§e"..tostring(v.name).."§a（编号 "..tostring(id).."）")
+    return true
+end
+
 function fixed_shop_begin(name)
     if not is_admin(name) then send(name,"§c只有管理权限可以设置系统商店商品。"); return true end
     local d,r=player_record(name,true); r.fixed_shop_setup={step=1}; set_menu(d,r,"fixed_shop_name"); send(name,"§e请输入要出售的商品名称："); return true
@@ -3986,6 +4073,66 @@ function nbt_test_report(name,coord_text)
     return true
 end
 
+-- ══════════════════════════════════════════════════════════════
+--   外部 AI Agent 桥接（聊天框输入「AI Agent 内容」→ 转发到云端收件箱）
+-- ══════════════════════════════════════════════════════════════
+--
+--   为什么要这个：管理员在聊天框说一句话，希望**由外部 AI Agent 来决断**，
+--   而不是插件内置的 AI。插件自己不做任何判断 —— 只负责原样搬运 + 立刻回执。
+--
+--   为什么用「一次性 POST」而不是长连接：
+--     插件里只有 http.post 这种一次性请求，而且云手机随时可能被切后台杀掉。
+--     投递失败也只是这一条没送到，不会影响插件其它功能。
+--
+--   启用：管理权限在聊天框输入
+--     .AIAgent密钥 <平台密钥>
+--   查看：.AIAgent状态
+--   关闭：.AIAgent密钥 （后面不带内容）
+-- ══════════════════════════════════════════════════════════════
+AI_AGENT_BRIDGE_URL = "https://ai-api.youyuanqi.dpdns.org/api/v1/agent/inbox"
+function ai_agent_bridge_file() return game.dataDir() .. "/ai_agent_bridge.json" end
+function ai_agent_bridge_key()
+    local ok,d = pcall(util.json_load, ai_agent_bridge_file())
+    if ok and type(d)=="table" then return tostring(d.key or "") end
+    return ""
+end
+function ai_agent_bridge_ready() return ai_agent_bridge_key() ~= "" end
+function ai_agent_set_key(name,key)
+    key = trim(tostring(key or ""))
+    local ok,err = pcall(util.json_write, ai_agent_bridge_file(), {key=key, set_by=tostring(name), set_at=util.timestamp()})
+    if not ok then send(name,"§c保存失败："..tostring(err)); return true end
+    if key=="" then send(name,"§e已清空 AI Agent 密钥，通道关闭。")
+    else send(name,"§aAI Agent 密钥已保存，通道已接通。\n§7在聊天框输入：§fAI Agent 你想说的话") end
+    return true
+end
+function ai_agent_bridge_status(name)
+    local ok,d = pcall(util.json_load, ai_agent_bridge_file())
+    local by,at = "未知","未知"
+    if ok and type(d)=="table" then by=tostring(d.set_by or "未知"); at=tostring(d.set_at or "未知") end
+    send(name,"§b━━ AI Agent 通道 ━━\n§f状态：§"..(ai_agent_bridge_ready() and "a已接通" or "c未设置密钥").."\n§f目标：§7"..AI_AGENT_BRIDGE_URL.."\n§f设置者：§7"..by.."\n§f设置时间：§7"..at.."\n§e用法：§fAI Agent 你想说的话")
+    return true
+end
+function ai_agent_forward(name, text)
+    local key = ai_agent_bridge_key()
+    if key == "" then return false, "未设置密钥（.AIAgent密钥 <平台密钥>）" end
+    local payload = http.json_encode({
+        player = tostring(name),
+        uuid = tostring(uuid_key(name) or ""),
+        text = tostring(text or ""),
+        at = util.timestamp(),
+    })
+    local ok, res = pcall(http.post, AI_AGENT_BRIDGE_URL, payload, {
+        headers = { ['Content-Type'] = 'application/json', ['X-Ds-Key'] = key },
+        timeout = 10,
+    })
+    if not ok then return false, tostring(res) end
+    if type(res)=="table" and tonumber(res.status) ~= nil and tonumber(res.status) >= 400 then
+        return false, "HTTP "..tostring(res.status).." "..tostring(res.body or ""):sub(1,120)
+    end
+    return true
+end
+
+
 function show_help(name)
     local d,r=player_record(name,true)
     r.menu="help"; r.menu_expires=util.timestamp()+MENU_TIMEOUT; save_data(d)
@@ -4018,13 +4165,49 @@ function show_gameplay_category(name,index)
 end
 
 function show_trigger_words(name,page)
+    -- ★ 2026-09-13 补全：原来这份清单漏了大半触发词，
+    --   现在按功能分组，把插件里真实存在的入口全列出来，方便随时查。
     local all={
-        ".help",".回",".传",".home",".保存",".保",".删除",".删",".死亡点返回",".tp",".soul",".签到",".传送机会",
-        ".添加权限",".撤回权限",".种子",".种子账号 <账号> <密码>",".种子状态",".积分版",".scoreboard 计分板名称",".AI模型 Flash/V4 Pro",".AI切换 Flash/V4 Pro",".查结构",".结构",".一键查询",".通",".NBT测试 X Y Z","./tp 玩家","ai 内容","AI 内容","AI 清除记忆","ai 清除记忆","指令 内容",".记忆清除",".清除记忆",
-        ".玩家市场",".查看商家 玩家名",".售卖物品",".售卖商品",".出售物品","领地密码 6位数字",".购物系统",".举报商品 编号",".查验 编号",".领地密码 6位数字",".生成兑换码 <自然语言> <有效期>",".生成兑换码 导出 <名称> X1 Y1 Z1 X2 Y2 Z2 <有效期> / 导入 <名称> <有效期>",".兑换 <兑换码>",".导入 <名称> X Y Z",".导出 <名称> X1 Y1 Z1 X2 Y2 Z2",".日志",".解除封禁",".触发词",".撤回传送",".撤销举报",".退出","+ / - 翻页"
+        -- 菜单 / 基础
+        ".help",".stop",".触发词",
+        -- 传送
+        ".保存 / .保",".回 / .home / .传",".删除 / .删",".死亡点",".我的死亡点",".死亡点返回",
+        ".tp 维度 X Y Z","./tp 玩家",".传送机会",".撤回传送",
+        -- 玩家
+        ".soul",".退出",".签到",".背包",".撤销",".撤销举报",
+        -- 权限
+        ".添加权限 玩家",".撤回权限 玩家",".禁言 玩家",".mute 玩家",".解除封禁",
+        -- 玩家市场 / 系统商店
+        ".玩家市场",".市场",".市场仓库 X Y Z",".查看商家 玩家名",".售卖物品",".售卖商品",
+        ".出售物品（系统商店上架）",".购买物品",".购物",".购物系统",".购物日志",
+        ".举报商品 编号",".商品举报 编号",".查验 编号",".日志",
+        -- 领地 / 保护
+        ".领地",".领地保护",".领地密码 6位数字",".区块保护 参数",".区块保护状态",".边缘保护 参数",
+        -- 结构 / 种子
+        ".查结构 结构名",".结构 结构名",".一键查询",".种子 种子号",".种子账号 账号 密码",".种子状态",
+        -- 区域 / 备份
+        ".导出 名称 X1 Y1 Z1 X2 Y2 Z2",".导入 名称 X Y Z",".打包",".打包文件",".打包所有文件",
+        ".备份",".备份文件",".备份所有文件",".完整备份",
+        -- 兑换码
+        ".生成兑换码 内容 有效期",".兑换 兑换码",
+        -- 积分 / 计分板
+        ".积分版 计分板名称",".scoreboard 计分板名称",".积分 玩家",
+        -- AI
+        "AI 内容（公开AI）","ai 内容（私聊AI）","指令 内容（指令Agent）","AI Agent 内容（转发外部AI）",
+        ".AI模型 Flash/V4 Pro",".AI切换 Flash/V4 Pro",".ai模型当前",".ai状态",".ai诊断",
+        ".AI设定 内容",".ai设定 清除",".AI 修改所有AI设定 内容",".全服AI设定",
+        ".全服AI设定 删除 编号",".AI 删除所有AI设定 编号",".AI 移除所有AI设定 编号",
+        ".AI 清空所有AI设定",".AI 清除所有AI设定",".AI停止",".AI停止全部 玩家",
+        ".清除记忆",".记忆清除","AI 清除记忆","ai 清除记忆",
+        -- QQ 群服互通
+        ".通 内容",".QQ状态",".QQ互通",".QQ群",
+        -- 其它
+        ".NBT测试 X Y Z",".nbt测试 X Y Z",".解释 内容",
+        ".停止建筑",".停止建造",".关闭建筑模式",".建筑模式关闭",
+        "+ / - 翻页"
     }
     local total=#all
-    local per_page=10
+    local per_page=12
     local max_page=math.max(1,math.ceil(total/per_page))
     page=math.max(1,math.min(page or 1,max_page))
     local first=(page-1)*per_page+1
@@ -4837,7 +5020,8 @@ function handle_menu(name, msg)
         if msg=="1" then fixed_shop_show(name,1); return true end
         if msg=="2" then return show_sell_price_list(name,1) end
         if msg=="3" then return full_shop_buy_main(name) end
-        send(name,"§c请输入1/2/3选择。"); return true
+        if msg=="4" then return fixed_shop_delete_list(name,1) end
+        send(name,"§c请输入1/2/3/4选择。"); return true
     end
 
     if mode == "full_shop_buy_main" then
@@ -5000,6 +5184,12 @@ function handle_menu(name, msg)
         if msg=="+" or msg=="-" then fixed_shop_show(name,(r.fixed_shop_page or 1)+(msg=="+" and 1 or -1)); return true end
         local n=tonumber(msg); local v=r.fixed_shop_list and r.fixed_shop_list[n]; if not v then send(name,"§c编号无效，请输入当前页商品序号。"); return true end
         return fixed_shop_buy(name,v.id)
+    end
+    if mode == "fixed_shop_delete" then
+        if msg=="+" then return fixed_shop_delete_list(name,(r.fixed_shop_del_page or 1)+1) end
+        if msg=="-" then return fixed_shop_delete_list(name,(r.fixed_shop_del_page or 1)-1) end
+        local n=tonumber(msg); local v=r.fixed_shop_del_list and r.fixed_shop_del_list[n]; if not v then send(name,"§c编号无效，请输入当前页商品序号。"); return true end
+        return fixed_shop_delete_do(name,v.id)
     end
     if mode == "fixed_shop_buy_confirm" then
         if msg=="0" then clear_menu(d,r); send(name,"§e已取消购买。"); return true end
@@ -6385,6 +6575,37 @@ function on_chat(playerName, msg)
         return
     end
 
+    -- 外部 AI Agent 通道配置（管理权限）
+    do
+        local k = msg:match("^%.AIAgent密钥%s*(.*)$") or msg:match("^%.aiagent密钥%s*(.*)$")
+        if k then
+            if not is_admin(playerName) then send(playerName,"§c只有管理权限可以设置 AI Agent 密钥。"); return end
+            ai_agent_set_key(playerName, trim(k)); return
+        end
+    end
+    if low==".aiagent状态" then ai_agent_bridge_status(playerName); return end
+
+
+    -- ★ 外部 AI Agent 入口：管理员在聊天框说「AI Agent 内容」→ 原样转发到云端收件箱。
+    --   必须放在 `low:sub(1,3)=="ai "` 那个判断**之前** ——
+    --   "ai agent xxx" 的前三个字符正是 "ai "，晚一步就会被内置 AI 当成普通提问吃掉。
+    if low:sub(1, 9) == "ai agent " or low == "ai agent" then
+        local text = trim(msg:sub(10))
+        if text == "" then
+            send(playerName,"§b━━ AI Agent 通道 ━━\n§e用法：§fAI Agent 你想说的话\n§7例：§fAI Agent 把系统商店里编号 3 的商品删掉\n§f状态：§"..(ai_agent_bridge_ready() and "a已接通" or "c未设置密钥，请先 .AIAgent密钥 <平台密钥>"))
+            return
+        end
+        if not is_admin(playerName) then send(playerName,"§c只有管理权限可以使用 AI Agent 通道。"); return end
+        local fok, ferr = ai_agent_forward(playerName, text)
+        if fok then
+            send(playerName,"§a已转发给 AI Agent：\n§f"..text.."\n§7等待外部 Agent 决断，结果会直接回到游戏里。")
+        else
+            send(playerName,"§c转发失败："..tostring(ferr).."\n§7请确认已设置：§f.AIAgent密钥 <平台密钥>")
+        end
+        return
+    end
+
+
     -- AI入口：普通聊天统一使用 ai / AI；“指令 ”仍是独立的指令AI入口。
     -- ./ 不再触发AI，./tp 只作为原有玩家传送入口。
     local question, commandMode, publicReply = nil, false, false
@@ -7182,4 +7403,241 @@ function ai_mute_player(target, duration, by)
     send(target,"§c你已被禁言："..mute_human(secs))
     log_event("MUTE", tostring(by or "?").." -> "..target.." "..mute_human(secs))
     return "✓ 已禁言 "..target.."，时长："..mute_human(secs)
+end
+
+-- ════════════════════════════════════════════════════════════
+--   一键完整备份：把「插件文件 + 配置文件 + 数据文件」打成 zip
+--   · 游戏里对 AI 说「打包并上传所有文件 / 备份所有文件」→ 自动执行
+--   · 也可以直接输入：.打包 / .备份 / .打包所有文件 / .完整备份
+--   · 输出文件名自动带日期时间：ds_ai_agent_完整备份_2026-09-13_0142.zip
+--   · 保存位置：/storage/emulated/0/我的世界指令相关/（手机本地存储）
+-- ════════════════════════════════════════════════════════════
+BACKUP_OUT_DIR = "/storage/emulated/0/我的世界指令相关"
+
+function backup_date_tag()
+    local t=tostring(util.now() or "")
+    local y,mo,d,h,mi=t:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)%s+(%d%d):(%d%d)")
+    if not y then return tostring(util.timestamp()) end
+    return y.."-"..mo.."-"..d.."_"..h..mi
+end
+
+function backup_file_name()
+    return "ds_ai_agent_完整备份_"..backup_date_tag()..".zip"
+end
+
+-- ── 备份上传（可选）──────────────────────────────────────────
+-- 插件配置项：
+--   backup_upload_url   = 上传接口地址（POST）；留空 = 只存本地，不上传
+--   backup_upload_token = 上传密钥 / Token（可空）
+--   backup_upload_mode  = raw（默认，直接发 zip 二进制）
+--                         base64（发 JSON：{filename,size,data:"<base64>"}）
+BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+function base64_encode(data)
+    data=tostring(data or "")
+    local out={}
+    local C=BASE64_CHARS
+    local n=#data
+    local i=1
+    while i<=n do
+        local b1=string.byte(data,i) or 0
+        local b2=string.byte(data,i+1)
+        local b3=string.byte(data,i+2)
+        local k1=math.floor(b1/4)+1
+        local k2=(b1%4)*16+math.floor((b2 or 0)/16)+1
+        if b2 and b3 then
+            local k3=(b2%16)*4+math.floor(b3/64)+1
+            out[#out+1]=C:sub(k1,k1)..C:sub(k2,k2)..C:sub(k3,k3)..C:sub(b3%64+1,b3%64+1)
+        elseif b2 then
+            local k3=(b2%16)*4+1
+            out[#out+1]=C:sub(k1,k1)..C:sub(k2,k2)..C:sub(k3,k3).."="
+        else
+            out[#out+1]=C:sub(k1,k1)..C:sub(k2,k2).."=="
+        end
+        i=i+3
+    end
+    return table.concat(out)
+end
+
+function backup_upload_config()
+    return {
+        url=trim(tostring(game.getConfig("backup_upload_url","") or "")),
+        token=trim(tostring(game.getConfig("backup_upload_token","") or "")),
+        mode=lower(trim(tostring(game.getConfig("backup_upload_mode","raw") or "raw"))),
+    }
+end
+
+-- 把本地备份 zip 上传到配置的地址；返回 是否成功, 说明文本。
+function backup_upload_file(path, fname)
+    local cfg=backup_upload_config()
+    if cfg.url=="" then return false,"未配置上传地址（插件配置 backup_upload_url 为空）" end
+    local ok,data=pcall(util.read_file,path)
+    if not ok or type(data)~="string" or data=="" then return false,"读取本地备份文件失败" end
+    local headers={["Content-Type"]="application/zip",["X-Filename"]=tostring(fname),["X-Backup-Name"]=tostring(fname)}
+    if cfg.token~="" then headers["Authorization"]="Bearer "..cfg.token end
+    local body=data
+    if cfg.mode=="base64" or cfg.mode=="json" or cfg.mode=="json_base64" then
+        headers["Content-Type"]="application/json"
+        body=http.json_encode({filename=tostring(fname),size=#data,data=base64_encode(data)})
+    end
+    local r=http.post(cfg.url, body, {headers=headers, timeout=180})
+    if not r or not r.ok then
+        log_event("BACKUP","upload fail: "..tostring(r and (r.error or r.status) or "无响应"))
+        return false,"上传请求失败："..tostring(r and (r.error or r.status) or "无响应")
+    end
+    local code=tonumber(r.status) or 0
+    if code<200 or code>=300 then
+        log_event("BACKUP","upload http "..tostring(code)..": "..tostring(r.body or ""):sub(1,200))
+        return false,"上传失败（HTTP "..tostring(code).."）："..tostring(r.body or ""):sub(1,200)
+    end
+    log_event("BACKUP","upload ok "..tostring(fname).." -> "..cfg.url)
+    return true, tostring(r.body or ""):sub(1,300)
+end
+
+-- 执行一次完整备份（打包 → 存本地 → 配置了地址则上传），返回给玩家看的结果文本。
+function run_full_backup(playerName, why)
+    local by=tostring(playerName or "控制台")
+    local fname=backup_file_name()
+    log_event("BACKUP", by.." start "..fname.." ("..tostring(why or "")..")")
+    local ok,report=pcall(pack_full_backup_zip,fname)
+    if not ok then
+        log_event("BACKUP", "fail: "..tostring(report))
+        return "§c打包失败："..tostring(report)
+    end
+    local report_text=tostring(report or "")
+    log_event("BACKUP", "done: "..report_text:gsub("\n"," | "))
+    local size=nil
+    local path=nil
+    for line in report_text:gmatch("[^\r\n]+") do
+        local p=line:match("^打包%s+%d+%s+个文件，输出：(.+)$")
+        if p then path=trim(p) end
+        local s=line:match("^大小：(%d+)%s*字节")
+        if s then size=s end
+    end
+    local full=tostring(path or (BACKUP_OUT_DIR.."/"..fname))
+    local out="§a✓ 完整备份已生成\n§f文件：§e"..fname..
+        "\n§f位置：§7"..full..
+        (size and ("\n§f大小：§b"..size.." 字节") or "")..
+        "\n§7内容：插件文件 + 插件配置 + 全部数据文件。"
+    local cfg=backup_upload_config()
+    if cfg.url=="" then
+        out=out.."\n§7☁ 未配置上传地址（backup_upload_url），仅保存在手机本地存储。"
+    else
+        local uok,uinfo=backup_upload_file(full,fname)
+        if uok then
+            out=out.."\n§b☁ 已上传：§7"..cfg.url
+        else
+            out=out.."\n§c☁ 上传失败：§7"..tostring(uinfo)
+        end
+    end
+    return out
+end
+
+-- 判断一句话是不是「打包/备份所有文件」的意图
+function is_backup_intent(t)
+    local s=lower(trim(tostring(t or "")))
+    if s=="" then return false end
+    local has_verb=s:find("打包",1,true) or s:find("备份",1,true) or s:find("压缩",1,true) or s:find("backup",1,true) or s:find("zip",1,true)
+    if not has_verb then return false end
+    local has_obj=s:find("文件",1,true) or s:find("所有",1,true) or s:find("全部",1,true) or s:find("整个",1,true)
+        or s:find("数据",1,true) or s:find("插件",1,true) or s:find("服务器",1,true)
+        or s:find("存档",1,true) or s:find("本地",1,true) or s:find("本机",1,true) or s:find("上传",1,true)
+    return has_obj~=nil
+end
+
+-- 包装原始 on_chat：命中打包意图就直接执行，不再让 AI 去猜。
+local _ds_orig_on_chat = on_chat
+function on_chat(playerName, msg)
+    local raw=trim(tostring(msg or ""))
+    local low=lower(raw)
+
+    -- ① 直接指令：.打包 / .备份 / .完整备份 …
+    if low==".打包" or low==".备份" or low==".打包所有文件" or low==".备份所有文件"
+        or low==".完整备份" or low==".打包文件" or low==".备份文件" then
+        if not is_admin(playerName) then
+            send(playerName,"§c只有管理权限可以打包服务器文件。")
+            return
+        end
+        send(playerName,"§b[备份] §f正在打包所有文件（插件+配置+数据），请稍候……")
+        local result=run_full_backup(playerName,"指令 "..raw)
+        send(playerName,result)
+        send(playerName,"§7本次文件清单已写入 runtime.log（关键词 BACKUP）。")
+        return
+    end
+
+    -- ② AI 入口里的打包意图：AI 打包并上传所有文件 / ai 备份所有文件
+    if low:sub(1,3)=="ai " or raw:sub(1,#COMMAND_WORD)==COMMAND_WORD then
+        local question
+        if raw:sub(1,#COMMAND_WORD)==COMMAND_WORD then
+            question=trim(raw:sub(#COMMAND_WORD+1))
+        else
+            question=trim(raw:sub(4))
+        end
+        if is_backup_intent(question) then
+            if not is_admin(playerName) then
+                send(playerName,"§c只有管理权限可以打包服务器文件。")
+                return
+            end
+            local pub=(raw:sub(1,3)=="AI ")
+            local notice="§b[备份] §f正在打包所有文件（插件+配置+数据），请稍候……"
+            if pub then broadcast(notice) else send(playerName,notice) end
+            local result=run_full_backup(playerName,"AI: "..question)
+            if pub then broadcast(result) else send(playerName,result) end
+            return
+        end
+    end
+
+    return _ds_orig_on_chat(playerName, msg)
+end
+
+-- 备份上传相关配置默认值。
+-- ⚠️ 不能在文件顶层直接调用 setConfigDefault：插件还在加载、配置尚未读入，
+--    那一刻调用会把整个配置文件覆盖成只剩这几个键（实测踩过）。
+--    改在这里包装 on_init（机器人就绪时触发），初始化完成后再补默认键。
+local _ds_orig_on_init = on_init
+function on_init()
+    if _ds_orig_on_init then pcall(_ds_orig_on_init) end
+    pcall(game.setConfigDefault,{
+        backup_upload_url="",
+        backup_upload_token="",
+        backup_upload_mode="raw",
+    })
+end
+
+-- ── 打包加速：32 位异或改用「8 位查表」实现 ──────────────────
+-- 原来的 zip_bxor 是逐位循环（每次 32 轮），而 CRC32 每处理 1 个字节要调用 2 次，
+-- 于是 2MB 的备份要跑约 1.4 亿轮内层循环（实测打包耗时 88 秒）。
+-- 这里用 256×256 的字节异或表，把一次 32 位异或降到 4 次查表 + 少量算术。
+XOR8_TABLE = nil
+function xor8_build()
+    if XOR8_TABLE then return XOR8_TABLE end
+    local t = {}
+    for a = 0, 255 do
+        local base = a * 256
+        for b = 0, 255 do
+            local x, y, r, bit = a, b, 0, 1
+            for _ = 1, 8 do
+                local xb = x % 2
+                local yb = y % 2
+                if xb ~= yb then r = r + bit end
+                x = (x - xb) / 2
+                y = (y - yb) / 2
+                bit = bit * 2
+            end
+            t[base + b] = r
+        end
+    end
+    XOR8_TABLE = t
+    return t
+end
+
+-- 覆盖文件前部的逐位版本（末尾定义生效）
+function zip_bxor(a, b)
+    local X = xor8_build()
+    a = math.floor(tonumber(a) or 0); b = math.floor(tonumber(b) or 0)
+    local a0 = a % 256; local b0 = b % 256
+    local a1 = ((a - a0) / 256) % 256; local b1 = ((b - b0) / 256) % 256
+    local a2 = ((a - a0 - a1 * 256) / 65536) % 256; local b2 = ((b - b0 - b1 * 256) / 65536) % 256
+    local a3 = math.floor(a / 16777216) % 256; local b3 = math.floor(b / 16777216) % 256
+    return X[a0 * 256 + b0] + X[a1 * 256 + b1] * 256 + X[a2 * 256 + b2] * 65536 + X[a3 * 256 + b3] * 16777216
 end

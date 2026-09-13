@@ -286,6 +286,36 @@ const TOOLS: any[] = [
       required: [],
     },
   },
+  {
+    name: 'agent_inbox',
+    description:
+      '★ 收「游戏里管理员对你说的话」。\n' +
+      '\n' +
+      '管理员在游戏聊天框输入「AI Agent 内容」，插件会把这句话原样投递到云端收件箱，\n' +
+      '你在这里收。这是「人 → 你」的通道；「你 → 游戏」走 prism_rest。\n' +
+      '\n' +
+      '★ 往游戏里回话时记住这条规则（实测确认过）：\n' +
+      '  指令前面加斜杠，普通说话不加，都从同一个口子进。\n' +
+      '    prism_rest POST /api/bot/console {"input":"/give 心话未达 diamond 1"}  ← 执行指令\n' +
+      '    prism_rest POST /api/bot/console {"input":"大家好"}                    ← 纯聊天，别加 say\n' +
+      '  不加斜杠 = 聊天；加了斜杠 = 指令并返回真实回包。别再写「say xxx」。\n' +
+      '\n' +
+      'action：\n' +
+      '  list   收取消息（默认）。unread=true 只看未读；limit 控制条数，默认 20\n' +
+      '  read   标记已读，用 ids 数组\n' +
+      '\n' +
+      '收完记得 action=read 标记已读，否则下次还会收到同一批。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'read'], description: '默认 list' },
+        unread: { type: 'boolean', description: '只看未读，list 时有效' },
+        limit: { type: 'number', description: '条数，list 时有效，默认 20' },
+        ids: { type: 'array', items: { type: 'number' }, description: 'action=read 时必填' },
+      },
+      required: [],
+    },
+  },
 ];
 
 // ------------------------------------------------------------
@@ -528,6 +558,62 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
           : `「AI帮写」知识底座 · part=${part}（${text.length} 字符）\n`
             + '─'.repeat(40) + '\n';
     return { content: [{ type: 'text', text: header + text }] };
+  }
+
+  if (name === 'agent_inbox') {
+    // ★ 表懒创建：省掉单独跑一次 D1 迁移，部署完就能用。
+    const INBOX_DDL = `CREATE TABLE IF NOT EXISTS agent_inbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      player TEXT, uuid TEXT, text TEXT,
+      created_at INTEGER, read_at INTEGER
+    )`;
+    await db.prepare(INBOX_DDL).run();
+
+    const action = String(a.action || 'list').toLowerCase();
+
+    if (action === 'read') {
+      const ids: number[] = Array.isArray(a.ids)
+        ? a.ids.map(Number).filter((n: number) => !isNaN(n))
+        : (a.id != null ? [Number(a.id)].filter((n: number) => !isNaN(n)) : []);
+      if (!ids.length) throw new Error('action=read 需要 ids 数组');
+      const now = Date.now();
+      for (const id of ids) {
+        await db.prepare('UPDATE agent_inbox SET read_at=? WHERE id=?').bind(now, id).run();
+      }
+      return { content: [{ type: 'text', text: `已把 ${ids.length} 条标记为已读。` }] };
+    }
+
+    const unread = a.unread === true || a.unread === 1 || a.unread === '1';
+    const limit = Math.min(Math.max(parseInt(String(a.limit ?? 20), 10) || 20, 1), 100);
+    const r = await db.prepare(
+      `SELECT id, player, uuid, text, created_at, read_at FROM agent_inbox
+       ${unread ? 'WHERE read_at IS NULL' : ''} ORDER BY id DESC LIMIT ?`,
+    ).bind(limit).all<any>();
+    const msgs: any[] = (r.results || []).slice().reverse();
+
+    if (!msgs.length) {
+      const tail = unread ? '（没有未读）' : '';
+      return {
+        content: [{
+          type: 'text',
+          text: `收件箱是空的${tail}。\n管理员在游戏聊天框输入「AI Agent 你想说的话」就能发到这里。\n前提：插件里已用 .AIAgent密钥 <平台密钥> 接通通道。`,
+        }],
+      };
+    }
+
+    const lines = msgs.map((m: any) => {
+      const t = new Date(m.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+      const flag = m.read_at ? '  ' : '● ';
+      return `${flag}#${m.id}  [${t}]  ${m.player || '?'}：${m.text}`;
+    });
+    return {
+      content: [{
+        type: 'text',
+        text: `收到 ${msgs.length} 条（● = 未读）：\n\n${lines.join('\n')}\n\n`
+          + '处理完用 action=read 把这几条标记已读，避免重复处理。\n'
+          + '回话走 prism_rest POST /api/bot/console：指令加斜杠，聊天不加。',
+      }],
+    };
   }
 
   throw new Error(`未知工具：${name}`);

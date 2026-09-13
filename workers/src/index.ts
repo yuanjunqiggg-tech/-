@@ -99,15 +99,20 @@ function checkAuth(req: Request, env: Env): boolean {
 }
 
 /**
- * 取密钥：优先 Authorization 头，其次 ?key= 查询参数。
+ * 取密钥：Authorization 头 → X-Ds-Key 头 → ?key= 查询参数。
  *
  * ★ 为什么必须支持 query：很多 MCP 客户端（以及网页接入）只允许你填一个 URL，
  *   没法自定义请求头。不支持 query 的话用户根本配不进去。
+ *
+ * ★ 为什么又加了 X-Ds-Key：插件（Lua）里发请求时，某些 Prism 版本会覆盖
+ *   Authorization 头，但自定义头能原样带出去。收件箱投递走的就是这个头。
  */
 function tokenFromRequest(req: Request): string {
   const auth = req.headers.get('Authorization') || '';
   const hdr = auth.replace(/^Bearer\s+/i, '').trim();
   if (hdr) return hdr;
+  const ds = (req.headers.get('X-Ds-Key') || '').trim();
+  if (ds) return ds;
   try {
     return new URL(req.url).searchParams.get('key') || '';
   } catch {
@@ -910,6 +915,64 @@ export default {
             'Access-Control-Allow-Origin': '*',
           },
         });
+      }
+
+      // --------------------------------------------------------
+      // ★ 外部 AI Agent 收件箱
+      //
+      //   链路：管理员在游戏聊天框输入「AI Agent 内容」
+      //        → 插件 http.post 投递到这里
+      //        → 外部 AI 用 MCP 工具 agent_inbox 收
+      //        → 决断后再用 prism_rest 把结果发回游戏
+      //
+      //   POST /api/v1/agent/inbox        {player, uuid, text, at}   插件投递
+      //   GET  /api/v1/agent/inbox?limit=20&unread=1                 外部 AI 收取
+      //   POST /api/v1/agent/inbox/read   {ids:[1,2]}                标记已读
+      //
+      //   ★ 表是懒创建的（CREATE TABLE IF NOT EXISTS），不用单独跑迁移。
+      // --------------------------------------------------------
+      const INBOX_DDL = `CREATE TABLE IF NOT EXISTS agent_inbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player TEXT, uuid TEXT, text TEXT,
+        created_at INTEGER, read_at INTEGER
+      )`;
+      if (path === '/api/v1/agent/inbox' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { /* 空 body 也接受 */ }
+        const text = String(b.text ?? b.content ?? b.message ?? '').trim();
+        if (!text) return fail('缺少 text', 400);
+        await env.DB.prepare(INBOX_DDL).run();
+        await env.DB.prepare(
+          'INSERT INTO agent_inbox (player, uuid, text, created_at, read_at) VALUES (?,?,?,?,NULL)',
+        ).bind(String(b.player || ''), String(b.uuid || ''), text, Date.now()).run();
+        return ok({ delivered: true, chars: text.length });
+      }
+      if (path === '/api/v1/agent/inbox' && req.method === 'GET') {
+        await env.DB.prepare(INBOX_DDL).run();
+        const unread = url.searchParams.get('unread') === '1';
+        const limit = Math.min(
+          Math.max(parseInt(url.searchParams.get('limit') || '20', 10) || 20, 1), 100,
+        );
+        const r = await env.DB.prepare(
+          `SELECT id, player, uuid, text, created_at, read_at FROM agent_inbox
+           ${unread ? 'WHERE read_at IS NULL' : ''} ORDER BY id DESC LIMIT ?`,
+        ).bind(limit).all<any>();
+        // 倒序取回来再翻正，让 AI 按「先说先到」的顺序读
+        return ok({ messages: (r.results || []).slice().reverse() });
+      }
+      if (path === '/api/v1/agent/inbox/read' && req.method === 'POST') {
+        await env.DB.prepare(INBOX_DDL).run();
+        let b: any = {};
+        try { b = await req.json(); } catch { /* 忽略 */ }
+        const ids: number[] = Array.isArray(b.ids)
+          ? b.ids.map(Number).filter((n) => !isNaN(n))
+          : (b.id != null ? [Number(b.id)].filter((n) => !isNaN(n)) : []);
+        if (!ids.length) return fail('缺少 ids', 400);
+        const now = Date.now();
+        for (const id of ids) {
+          await env.DB.prepare('UPDATE agent_inbox SET read_at=? WHERE id=?').bind(now, id).run();
+        }
+        return ok({ marked: ids.length });
       }
 
       // --------------------------------------------------------
