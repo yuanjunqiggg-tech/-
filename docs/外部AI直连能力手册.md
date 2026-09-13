@@ -157,8 +157,8 @@
 | `POST` | `/api/fleet/connect` | `—` |
 | `POST` | `/api/fleet/disconnect` | `—` |
 | `GET` | `/api/fleet/status` | `—` |
-| `POST` | `/api/mcfunction/execute` | `{content:mcfnState.content,global:mcfnState.globalConfig,groups:gc,tests:te2}` |
-| `POST` | `/api/mcfunction/parse` | `{content:c}` |
+| `POST` | `/api/mcfunction/execute` | `{"content":"say hi","global":{},"groups":[],"tests":[]}` ★ content 必须是**字符串**（多行用 \n 分隔），传数组会回「无效JSON」 |
+| `POST` | `/api/mcfunction/parse` | `{"content":"say hi"}` ★ 同上，content 为字符串 |
 | `GET` | `/api/mcfunction/status` | `—` |
 | `POST` | `/api/mcfunction/stop` | `{}` |
 | `GET` | `/api/players/list` | `—` |
@@ -348,6 +348,9 @@
 - `/api/ai/snapshot/restore` ★已验证
 
 ### 机器人 / 游戏（17 个）
+
+> ★ 2026-09-13 17:25 真机（本机一号 / v1.4）实测**写通道**：`POST /api/bot/console {"input":"say 你好"}` → `{ok:true,type:"chat"}`；
+> `POST /api/mcfunction/execute {"content":"say test",...}` → `{ok:true}`。两条 POST 带 body 全部打通。
 
 - `/api/bot/connect` ★已验证
 - `/api/bot/console` ★已验证

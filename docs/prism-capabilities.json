@@ -768,7 +768,7 @@
       "POST"
     ],
     "verified_from_frontend": true,
-    "sample_body": "{content:mcfnState.content,global:mcfnState.globalConfig,groups:gc,tests:te2}"
+    "sample_body": "{\"content\":\"say hi\",\"global\":{},\"groups\":[],\"tests\":[]}  ★content 必须为字符串（数组会回无效JSON），2026-09-13 真机验证通过"
   },
   {
     "category": "机器人 / 游戏",
@@ -777,7 +777,7 @@
       "POST"
     ],
     "verified_from_frontend": true,
-    "sample_body": "{content:c}"
+    "sample_body": "{\"content\":\"say hi\"}  ★content 必须为字符串（数组会回无效JSON）"
   },
   {
     "category": "机器人 / 游戏",
@@ -1452,7 +1452,7 @@
       "POST"
     ],
     "verified_from_frontend": true,
-    "sample_body": "{content:c}"
+    "sample_body": "{\"content\":\"say hi\"}  ★content 必须为字符串（数组会回无效JSON）"
   },
   {
     "category": "命令方块",
