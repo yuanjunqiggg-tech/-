@@ -527,8 +527,9 @@
 
 1. **MCP 网址**（外部 AI 用）
    `https://ai-api.youyuanqi.dpdns.org/mcp?key=<平台密钥>`
-   11 个工具：`prism_rest` 是主通道，`prism_status` 用来诊断，
+   12 个工具：`prism_rest` 是主通道，`prism_status` 用来诊断，
    `bot_keeper` 管机器人连接（掉线自动重连），
+   `ai_assist_context` 提供 AI帮写 的系统提示词和技能知识库（改插件必读），
    `prism_chat`/`prism_tool` 是走内置 AI 的旧通道（不推荐）。
 2. **命令行**（我调试用）
    `python tools/mcp.py rest /api/bot/status`

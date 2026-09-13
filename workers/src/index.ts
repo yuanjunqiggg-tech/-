@@ -28,13 +28,14 @@ import {
 import { listModels, createModel, updateModel, deleteModel, chatProxy } from './models';
 import { handleMcp } from './mcphttp';
 import { runOnDevice, pickDevice, streamCommandSSE } from './relay';
+import { AI_ASSIST_PARTS, buildAiAssistContext } from './aicontext';
 
 /**
  * 构建标记。改代码时顺手改一下这个值，
  * 就能用 GET /api/v1/__build 确认线上跑的到底是哪一版 ——
  * 排查「部署了但没生效」时省大量时间。
  */
-const BUILD_TAG = '2026-09-13-botkeeper-v1.4';
+const BUILD_TAG = '2026-09-13-aiassist-context-v1.5';
 
 export interface Env {
   DB: D1Database;
@@ -764,7 +765,10 @@ export default {
 
     // 构建标记：用来确认线上跑的到底是哪一版（排查部署没生效时非常有用）
     if (path === '/api/v1/__build') {
-      return ok({ build: BUILD_TAG, features: ['bot_keeper', 'prism_status', 'mcp_v1'] });
+      return ok({
+        build: BUILD_TAG,
+        features: ['bot_keeper', 'prism_status', 'mcp_v1', 'ai_assist_context'],
+      });
     }
 
     // --------------------------------------------------------
@@ -872,6 +876,39 @@ export default {
       // 统计
       if (path === '/api/v1/ai-assist/stats' && req.method === 'GET') {
         return stats(env);
+      }
+
+      // --------------------------------------------------------
+      // ★ 「AI帮写」知识底座 —— 系统提示词 / 工具集 / 技能知识库
+      //
+      //   为什么放在这里：外部 AI 用 prism_rest 拿到的是**权限**，
+      //   但 AI帮写 的**知识**（提示词 + 基岩版指令库 + FMbe 动画库）
+      //   接口给不了。搬到云端后，不依赖云手机在线就能取。
+      //   MCP 那边有对应的 ai_assist_context 工具，这里是给网页/脚本用的。
+      //
+      //     GET /api/v1/ai-assist/context               → 各部分清单（默认）
+      //     GET /api/v1/ai-assist/context?part=prompt   → 系统提示词
+      //     GET /api/v1/ai-assist/context?part=tools    → 29 个工具
+      //     GET /api/v1/ai-assist/context?part=skills   → 基岩版指令 + FMbe
+      //     GET /api/v1/ai-assist/context?part=plugin_doc → 插件开发文档
+      //     GET /api/v1/ai-assist/context?part=all      → 全部
+      //     GET /api/v1/ai-assist/context?part=index&json=1 → 结构化清单
+      // --------------------------------------------------------
+      if (path === '/api/v1/ai-assist/context' && req.method === 'GET') {
+        const part = (url.searchParams.get('part') || 'index').toLowerCase();
+        const valid = ['index', 'prompt', 'tools', 'skills', 'plugin_doc', 'all'];
+        if (!valid.includes(part)) {
+          return fail(`part 只能是 ${valid.join(' / ')}`, 400);
+        }
+        if (part === 'index' && url.searchParams.get('json') === '1') {
+          return ok({ parts: AI_ASSIST_PARTS });
+        }
+        return new Response(buildAiAssistContext(part), {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Access-Control-Allow-Origin': '*',
+          },
+        });
       }
 
       // --------------------------------------------------------
