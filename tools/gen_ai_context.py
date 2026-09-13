@@ -76,6 +76,10 @@ fmbe = read('extracted/skills/display-entities.md')
 plugin_doc = read('extracted/skills/plugin-dev.md')
 wordbank_doc = read('extracted/skills/wordbank-plugin-dev.md')
 
+# ★ 能力宣言（强提示）—— 手写的，告诉外部 AI「你有这一整套能力」，
+#   别让它以为自己只有「发条消息」这一项。这是用户明确要求的。
+capability_manifest = read('extracted/ai_assist/00_能力宣言.md')
+
 # ------------------------------------------------------------
 # 2. 人类可读的上下文包
 # ------------------------------------------------------------
@@ -134,6 +138,18 @@ readme = """# AI帮写 等价上下文包
 
 再加上 Prism 自己的插件开发文档（`05_` `06_`），外部 AI 才算真的「能替 AI帮写干活」。
 
+## ★ 还有一份「能力宣言」
+
+`00_能力宣言.md` —— 用户明确要求的**强提示**：
+> 「让 AI Agent 知道他可以有这些能力，而不是他只有这项能力」
+
+外部 AI 很容易因为用户只提了一个需求，就以为自己只有那一项能力
+（比如用户说「发句话」，它就只会发消息，不会想到先查机器人状态、
+不会想到先读插件源码）。能力宣言就是治这个的。
+
+它是 `ai_assist_context` 的**默认返回**，也会出现在 MCP `initialize`
+的 `instructions` 里 —— AI 一连上就能看到。
+
 ## 怎么用
 
 **给外部 AI Agent（推荐）**：调 MCP 工具 `ai_assist_context`，不用设备在线：
@@ -152,6 +168,7 @@ POST https://ai-api.youyuanqi.dpdns.org/mcp?key=<平台密钥>
 
 | 文件 | 内容 |
 |---|---|
+| `00_能力宣言.md` | ★ 告诉 AI「你有这一整套能力」的强提示（默认返回） |
 | `01_系统提示词.md` | AI帮写 系统提示词原文（585 字符） |
 | `02_工具集_29个.md` | 29 个内置工具 + 参数 |
 | `03_技能_基岩版指令.md` | 命令清单 / 选择器参数 / 命令参数类型 |
@@ -186,7 +203,7 @@ def ts_str(s):
     return json.dumps(s, ensure_ascii=False)
 
 ts = '''// ============================================================
-//  aicontext.ts —— 「AI帮写」的知识底座（自动生成，请勿手改）
+//  aicontext.ts —— 「AI帮写」的知识底座 + 能力宣言（自动生成，请勿手改）
 // ============================================================
 //
 //  生成：python tools/gen_ai_context.py
@@ -197,7 +214,16 @@ ts = '''// ============================================================
 //    但拿不到 AI帮写 的**知识**（提示词 / 技能库）。
 //    把知识也搬上云端，外部 AI 才算真正能替 AI帮写干活，
 //    而且**不依赖云手机在线** —— 设备掉线也能先把上下文读进去。
+//
+//  ★ CAPABILITY_MANIFEST（能力宣言）是用户明确要求的「强提示」：
+//    用户可能只让 AI 做一件事，但必须让它知道自己有**整套**能力，
+//    不要把自己局限成「只有一个功能的工具」。
+//    所以它同时出现在 MCP initialize 的 instructions 里（连上就看到），
+//    也是 ai_assist_context 的默认返回。
 // ============================================================
+
+/** ★ 能力宣言 —— 告诉外部 AI「你有这一整套能力」的强提示 */
+export const CAPABILITY_MANIFEST = %s;
 
 /** AI帮写 的系统提示词原文（捕获代理拦到的 messages[0].content） */
 export const AI_ASSIST_SYSTEM_PROMPT = %s;
@@ -219,6 +245,8 @@ export const PRISM_WORDBANK_DEV_DOC = %s;
 
 /** 各部分的元信息，供 ai_assist_context 的 index 分支使用 */
 export const AI_ASSIST_PARTS: { key: string; title: string; chars: number; desc: string }[] = [
+  { key: 'capabilities', title: '★ 能力宣言（你有什么能力）', chars: CAPABILITY_MANIFEST.length,
+    desc: '连上就该先看这个 —— 你有一整套能力，不是只会发消息' },
   { key: 'prompt', title: 'AI帮写 系统提示词', chars: AI_ASSIST_SYSTEM_PROMPT.length,
     desc: 'AI帮写 的身份设定与工具调用规则，原文' },
   { key: 'tools', title: 'AI帮写 29 个工具', chars: AI_ASSIST_TOOLS_MD.length,
@@ -231,7 +259,10 @@ export const AI_ASSIST_PARTS: { key: string; title: string; chars: number; desc:
 
 /** 把多个部分拼成一段可直接塞进上下文的大文本 */
 export function buildAiAssistContext(part: string): string {
-  const p = (part || 'index').toLowerCase();
+  // ★ 默认返回能力宣言，不是清单。
+  //   用户要的是「连上就知道自己有什么能力」，不是「连上先看目录」。
+  const p = (part || 'capabilities').toLowerCase();
+  if (p === 'capabilities') return CAPABILITY_MANIFEST;
   if (p === 'prompt') return AI_ASSIST_SYSTEM_PROMPT;
   if (p === 'tools') return AI_ASSIST_TOOLS_MD;
   if (p === 'skills') {
@@ -245,7 +276,9 @@ export function buildAiAssistContext(part: string): string {
       + '\\n\\n===== Prism 工具箱 · 词库插件开发文档 =====\\n\\n' + PRISM_WORDBANK_DEV_DOC;
   }
   if (p === 'all') {
-    return '===== AI帮写 系统提示词（原文） =====\\n\\n' + AI_ASSIST_SYSTEM_PROMPT
+    // 能力宣言排最前 —— 先知道自己能干什么，再看具体知识
+    return '===== ★ 能力宣言（你有什么能力） =====\\n\\n' + CAPABILITY_MANIFEST
+      + '\\n\\n===== AI帮写 系统提示词（原文） =====\\n\\n' + AI_ASSIST_SYSTEM_PROMPT
       + '\\n\\n===== AI帮写 29 个内置工具 =====\\n\\n' + AI_ASSIST_TOOLS_MD
       + '\\n\\n' + buildAiAssistContext('skills')
       + '\\n\\n' + buildAiAssistContext('plugin_doc');
@@ -253,10 +286,11 @@ export function buildAiAssistContext(part: string): string {
   // index
   return AI_ASSIST_PARTS
     .map((x) => `- ${x.key}（${x.chars} 字符）：${x.title} —— ${x.desc}`)
-    .join('\\n');
+    .join('\\n')
+    + '\\n\\n（不传 part 时默认返回 capabilities，即能力宣言）';
 }
-''' % (ts_str(system_prompt), ts_str(tools_md), ts_str(bedrock), ts_str(fmbe),
-       ts_str(plugin_doc), ts_str(wordbank_doc))
+''' % (ts_str(capability_manifest), ts_str(system_prompt), ts_str(tools_md),
+       ts_str(bedrock), ts_str(fmbe), ts_str(plugin_doc), ts_str(wordbank_doc))
 
 with open(OUT_TS, 'w', encoding='utf-8') as f:
     f.write(ts)

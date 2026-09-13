@@ -17,7 +17,7 @@
 
 import { runOnDevice, pickDevice } from './relay';
 import { listModels, chatProxy } from './models';
-import { buildAiAssistContext } from './aicontext';
+import { buildAiAssistContext, CAPABILITY_MANIFEST } from './aicontext';
 
 export const MCP_PROTOCOL_VERSION = '2024-11-05';
 export const MCP_SERVER_INFO = { name: 'prism-remote', version: '1.0.0' };
@@ -105,6 +105,10 @@ const TOOLS: any[] = [
       '【音乐】/api/music/play|stop|note|queue|upload\n' +
       '【皮肤/相机/预览】/api/skin/*、/api/camera/*、/api/preview/*\n' +
       '\n' +
+      '★ 上面只是常用端点。你还有插件改写、抓包发包、shell、飞行、建筑、\n' +
+      '  音乐/皮肤/相机/预览等一整套能力 —— 完整清单调 ' +
+      'ai_assist_context（不传 part 就是能力宣言）。\n' +
+      '  别因为用户只提一个需求就以为你只有一项能力。\n' +
       '调用前先 GET /api/bot/status 确认机器人状态；写操作要谨慎，直接影响云手机。',
     inputSchema: {
       type: 'object',
@@ -248,33 +252,35 @@ const TOOLS: any[] = [
   {
     name: 'ai_assist_context',
     description:
-      '★ 拿到「AI帮写」的知识底座 —— 你改插件之前应该先读这个。\n' +
+      '★ 拿到你的**能力清单**和「AI帮写」的**知识底座** —— 动手之前先读这个。\n' +
       '\n' +
       '为什么需要：你用 prism_rest 能拿到比 AI帮写 更高的**权限**，\n' +
       '但拿不到它的**知识**。AI帮写 手里有三样东西是接口给不了的：\n' +
       '  1) 系统提示词 —— 它的身份设定、该写什么、工具调用规则\n' +
       '  2) 29 个内置工具的定义\n' +
       '  3) 技能知识库 —— 基岩版指令库、FMbe 显示实体动画\n' +
-      '这个工具把三样一起给你，等于把 AI帮写 的脑子也搬过来了。\n' +
+      '这个工具把这些一起给你，等于把 AI帮写 的脑子也搬过来了。\n' +
       '\n' +
       '★ 不依赖云手机在线 —— 内容存在云端，设备掉线也能读。\n' +
       '\n' +
       'part：\n' +
-      '  index       先看有什么（默认），返回各部分的 key 和字符数\n' +
-      '  prompt      AI帮写 系统提示词原文\n' +
-      '  tools       AI帮写 29 个内置工具清单\n' +
-      '  skills      技能知识库（基岩版指令 + FMbe 显示实体）\n' +
-      '  plugin_doc  Prism 插件开发文档 + 词库插件开发文档（写插件必读）\n' +
-      '  all         全部拼在一起（约 7.6 万字符，注意上下文占用）\n' +
+      '  capabilities  ★默认 —— 能力宣言：你到底有哪些能力（别以为你只会发消息）\n' +
+      '  index         各部分的 key 和字符数\n' +
+      '  prompt        AI帮写 系统提示词原文\n' +
+      '  tools         AI帮写 29 个内置工具清单\n' +
+      '  skills        技能知识库（基岩版指令 + FMbe 显示实体）\n' +
+      '  plugin_doc    Prism 插件开发文档 + 词库插件开发文档（写插件必读）\n' +
+      '  all           全部拼在一起（约 8 万字符，注意上下文占用）\n' +
       '\n' +
-      '推荐流程：index → skills → plugin_doc → 动手写代码 → prism_rest 写回并 reload。',
+      '推荐流程：capabilities（知道能干什么）→ skills → plugin_doc\n' +
+      '          → 动手写代码 → prism_rest 写回并 POST /api/plugin/reload。',
     inputSchema: {
       type: 'object',
       properties: {
         part: {
           type: 'string',
-          enum: ['index', 'prompt', 'tools', 'skills', 'plugin_doc', 'all'],
-          description: '默认 index',
+          enum: ['capabilities', 'index', 'prompt', 'tools', 'skills', 'plugin_doc', 'all'],
+          description: '默认 capabilities（能力宣言）',
         },
       },
       required: [],
@@ -506,18 +512,21 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
   }
 
   if (name === 'ai_assist_context') {
-    const part = String(a.part || 'index').toLowerCase();
-    const valid = ['index', 'prompt', 'tools', 'skills', 'plugin_doc', 'all'];
+    const part = String(a.part || 'capabilities').toLowerCase();
+    const valid = ['capabilities', 'index', 'prompt', 'tools', 'skills', 'plugin_doc', 'all'];
     if (!valid.includes(part)) {
       throw new Error(`part 只能是 ${valid.join(' / ')}，收到：${part}`);
     }
     const text = buildAiAssistContext(part);
     // index 分支给一段「说明书」，其余分支是正文，前面加个抬头方便 AI 判断拿到的是什么
     const header =
-      part === 'index'
-        ? '「AI帮写」知识底座 —— 可选部分（用 part 参数取正文）：\n'
-        : `「AI帮写」知识底座 · part=${part}（${text.length} 字符）\n`
-          + '─'.repeat(40) + '\n';
+      part === 'capabilities'
+        ? '★ 你的能力清单（你有的能力远不止用户提到的那一项）\n'
+          + '─'.repeat(40) + '\n'
+        : part === 'index'
+          ? '「AI帮写」知识底座 —— 可选部分（用 part 参数取正文）：\n'
+          : `「AI帮写」知识底座 · part=${part}（${text.length} 字符）\n`
+            + '─'.repeat(40) + '\n';
     return { content: [{ type: 'text', text: header + text }] };
   }
 
@@ -582,14 +591,11 @@ export async function handleMcp(req: Request, env: any): Promise<Response> {
           serverInfo: MCP_SERVER_INFO,
           capabilities: { tools: { listChanged: false } },
           instructions:
-            '你有 Prism 工具箱的远程控制权。' +
-            '★ prism_rest = 直接打 Prism 的本机接口，你就是执行者，权限最高，优先用它；' +
-            'prism_chat = 让云手机里的 Prism AI 干活；' +
-            'prism_tool = 调 Prism 的 29 个内置工具（中间隔了一层 AI，会拒绝执行）；' +
-            'ai_chat = 用用户配置的大模型思考。' +
-            '★ 要写或改插件之前，先调 ai_assist_context 拿「AI帮写」的系统提示词、' +
-            '工具定义和技能知识库（基岩版指令 / FMbe 动画），否则你只有权限没有知识。' +
-            '先 list_devices 确认设备在线（ai_assist_context 不需要设备在线）。',
+            CAPABILITY_MANIFEST +
+            '\n\n（上面是你的完整能力清单。' +
+            '核心通道：prism_rest = 直接打 Prism 本机接口，你就是执行者，权限最高；' +
+            'prism_tool = 调 29 个内置工具，中间隔一层 AI 会拒绝执行，不推荐；' +
+            '要写插件先调 ai_assist_context part=skills / part=plugin_doc。）',
         });
 
       case 'notifications/initialized':

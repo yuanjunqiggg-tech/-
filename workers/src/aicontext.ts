@@ -1,5 +1,5 @@
 // ============================================================
-//  aicontext.ts —— 「AI帮写」的知识底座（自动生成，请勿手改）
+//  aicontext.ts —— 「AI帮写」的知识底座 + 能力宣言（自动生成，请勿手改）
 // ============================================================
 //
 //  生成：python tools/gen_ai_context.py
@@ -10,7 +10,16 @@
 //    但拿不到 AI帮写 的**知识**（提示词 / 技能库）。
 //    把知识也搬上云端，外部 AI 才算真正能替 AI帮写干活，
 //    而且**不依赖云手机在线** —— 设备掉线也能先把上下文读进去。
+//
+//  ★ CAPABILITY_MANIFEST（能力宣言）是用户明确要求的「强提示」：
+//    用户可能只让 AI 做一件事，但必须让它知道自己有**整套**能力，
+//    不要把自己局限成「只有一个功能的工具」。
+//    所以它同时出现在 MCP initialize 的 instructions 里（连上就看到），
+//    也是 ai_assist_context 的默认返回。
 // ============================================================
+
+/** ★ 能力宣言 —— 告诉外部 AI「你有这一整套能力」的强提示 */
+export const CAPABILITY_MANIFEST = "# 能力宣言 —— 你拥有的能力远不止「在游戏里发消息」\n\n> 这段是给**外部 AI Agent** 看的强提示。\n> 目的：用户可能只让你做一件事（比如「在游戏里发句话」），\n> 但你必须知道**自己有整套能力**，别把自己局限成「只有一个功能的工具」。\n> 需要别的手段时（比如先查机器人状态、先读插件源码），**直接去用，不用请示**。\n\n---\n\n你连着的是一台云手机里的 **Prism 工具箱**（《我的世界》基岩版租赁服工具箱）。\n下面是你**全部**能做的事。这不是「理论上可以」，是**接口真实存在、可直接调用**。\n\n## 一、游戏世界（直接操作，机器人已是 OP）\n\n| 你要做的事 | 怎么调 |\n|---|---|\n| 发聊天消息 / 执行任意指令 | `POST /api/bot/console {\"input\":\"say 你要说的话\"}` |\n| 批量执行一堆指令 | `POST /api/mcfunction/execute {\"content\":\"第一行\\n第二行\"}` ★ `content` 必须是**字符串**，传数组会回「无效JSON」 |\n| 机器人连没连、在哪个服、是不是 OP | `GET /api/bot/status` |\n| 重新连机器人 | `POST /api/bot/connect` 或调 MCP 工具 `bot_keeper` |\n| 起飞 / 降落 / 移动 / 传送 / 跳跃 | `/api/fly/*`（start / stop / move / teleport / jump / down / look / position / status） |\n| 建筑分析、体素提取 | `/api/building/analyze`、`/api/building/voxel` |\n| 画板（像素画 / 方块绘制） | `/api/draw/*`（create / stroke / apply / state / undo / redo / palette） |\n| 在线玩家 | `GET /api/players/list` |\n| 寻路 | `/api/pathfinder/log` |\n| 服务器信息 | `/api/server/detail`、`/api/server/players` |\n\n## 二、插件与代码 ★ 这是「改写 Prism 底层」的入口\n\n| 你要做的事 | 怎么调 |\n|---|---|\n| 列出已装插件 | `GET /api/plugin/list` |\n| 读插件源码 / 文档 / 配置 | `GET /api/plugin/file/read?id=..&scope=code\\|docs&file=..` |\n| **写插件源码** | `POST /api/plugin/file/write` |\n| **★ 改完必须热重载才生效** | `POST /api/plugin/reload` —— 忘了这步等于白改 |\n| 新建 / 删除 / 停用插件 | `/api/plugin/create`、`/api/plugin/delete`、`/api/plugin/disabled` |\n| 运行 / 停止插件 | `/api/plugin/run`、`/api/plugin/stop` |\n| 导入 / 导出插件 | `/api/plugin/import`、`/api/plugin/export` |\n| **直接执行 Lua（不写进插件）** | MCP `prism_tool`，`tool_name=\"lua_call\"` |\n| **直接调插件里的函数（测试用）** | MCP `prism_tool`，`tool_name=\"call_plugin_function\"` |\n\n写插件前先调 `ai_assist_context part=plugin_doc` 读开发文档，\n写指令相关代码前先调 `part=skills` 读基岩版指令库。\n\n## 三、文件与系统\n\n| 你要做的事 | 怎么调 |\n|---|---|\n| 列目录 / 读文件 | `/api/files/scan`、`/api/files/read` |\n| **执行 shell 命令【高危】** | MCP `prism_tool`，`tool_name=\"system_shell\"` |\n| 查 Shizuku 是否可用 | MCP `prism_tool`，`tool_name=\"shizuku_status\"` |\n| 任务（长耗时操作）管理 | `/api/task/list`、`/api/task/start`、`/api/task/stop`、`/api/task/resume` |\n| 节点（子机器人）管理 | `/api/node/status`、`/api/node/start`、`/api/node/stop` |\n| 重启 Prism 服务 | `/api/system/restart` |\n\n> ⚠ `system_shell` 等于把云主机的 shell 交出去。高危操作前请确认这是用户要的。\n\n## 四、抓包与协议（这是 Prism 最有特色的能力）\n\n| 你要做的事 | 怎么调 |\n|---|---|\n| 看抓包历史 / 统计 / 回看 | MCP `packet_history`，`action=list\\|stats\\|query` |\n| 构造并发送任意数据包 | MCP `packet_send` |\n| 订阅某类包 | MCP `prism_tool`，`tool_name=\"listen_packet\"` |\n| 查包结构定义 | MCP `prism_tool`，`tool_name=\"list_packet_schema\"` |\n| 执行命令并同时监听包 | MCP `prism_tool`，`tool_name=\"run_and_watch_packet\"` |\n\n## 五、AI 与会话\n\n| 你要做的事 | 怎么调 |\n|---|---|\n| 让 Prism 内置 AI 帮你干活 | MCP `prism_chat`（中间隔一层 AI，会拒绝执行，不推荐） |\n| 用云端配置的大模型思考 | MCP `ai_chat` |\n| 列出 / 切换可用模型 | MCP `list_ai_models` |\n| 会话存取 | MCP `prism_session`；`/api/ai/sessions*` |\n\n## 六、机器人连接守护 ★ 你有、AI帮写 没有\n\nMCP 工具 `bot_keeper`：机器人掉线**自动重连**。\n\n- `mode=always` 一直守护（默认）\n- `mode=once` 只连一次，连上后自动关\n- `mode=off` 关闭守护\n\nPrism 内置的 AI帮写**做不到这个** —— 机器人一掉线它就只会在提示词里写\n「机器人当前未连接，game_call 工具会返回错误，不要依赖它」，然后干等。\n你比它强在这点。\n\n## 七、媒体与创作\n\n| 你要做的事 | 怎么调 |\n|---|---|\n| 播放音乐 / 音符 | `/api/music/*`（play / stop / next / note / loop / queue） |\n| 皮肤相关 | `/api/skin/*`（build / head / online-*） |\n| 相机截图 | `/api/camera/*`（shots / generate / start / clear） |\n| 预览渲染 / 导出 GIF | `/api/preview/*` |\n| 地图画预览 | `/api/mapart/preview` |\n| 跑马灯（滚动字幕） | `/api/marquee/*` |\n| 指令方块导入导出 | `/api/cb/*` |\n\n## 八、插件市场\n\n`/api/plugin-market/*`、`/api/market/*` —— 搜索、下载、安装别人分享的插件。\n`/api/plugin-market/install` 已验证可用。\n\n---\n\n## ★ 三条行事准则\n\n1. **你不是「只能发消息」。** 用户可能只提一个需求，但你觉得需要别的手段\n   （先查机器人状态、先读插件源码、先抓个包看看协议），**直接去用，不用请示**。\n\n2. **写操作前先读一次状态。** 比如发指令之前 `GET /api/bot/status`，\n   发现 `connected=false` 就先用 `bot_keeper` 连上 —— 别干等，也别直接报错放弃。\n\n3. **改插件源码后必须 `POST /api/plugin/reload`**，否则改的内容不生效。\n\n## ★ 前置条件（不是被限制，只是要按顺序来）\n\n有些能力需要前置状态，不满足时会**明确报错**（不是 404，也不是静默拒绝）：\n\n- `/api/fly/*`、`/api/draw/*` 需要机器人已连接\n- `/api/draw/*` 还需要先创建画板\n- 抓包类需要先开启包监听\n- `game_call`（内置 AI 工具）需要机器人已连接\n\n报错本身就是信息 —— 看清楚缺什么，自己补齐前置条件再重试。\n**整个循环不需要人去碰 Prism 界面。**\n";
 
 /** AI帮写 的系统提示词原文（捕获代理拦到的 messages[0].content） */
 export const AI_ASSIST_SYSTEM_PROMPT = "你是《我的世界》基岩版租赁服「Prism工具箱」的插件开发助手，帮助用户编写和修改 Lua 插件或词库插件。\n你可以用工具：网络请求、DuckDuckGo 网络搜索、读取/列出插件、读写插件文件、机器人连接时调用游戏内 game API。\n写 Lua 代码时：调用游戏能力一律用 game.* 全局 API；要给出完整、可直接运行的代码，不要用省略号占位；写完后应主动用 write_plugin_file 工具（scope=code）把代码直接保存进插件文件。\n\n【工具调用规则】调用工具必须真正发起 tool_calls，绝不能只在回复文字里写\"我已调用XX工具\"或\"调用XX后……\"而不发起实际调用——每个你声称要做的工具动作，都必须对应一条真实的 tool_calls。工具执行完会把真实结果回传给你（可能是空数组 []，空结果不代表失败）。以回传的真实结果为准，不要臆想/编造工具结果。不依赖先后关系的工具可以一次并行调用多个；有依赖时等前一个结果返回后再调用下一个。\n当前会话标题：capture-test。若你觉得这个标题不够贴切，可用 rename_session 工具改一个更贴切的标题。\n若用户要求用到基岩版指令/FMbe 动画等专项知识，参考下方【技能知识库】（已加载的技能）。\n\n机器人当前未连接，game_call 工具会返回错误，不要依赖它。";
@@ -32,6 +41,8 @@ export const PRISM_WORDBANK_DEV_DOC = "# Prism 工具箱 · 词库插件开发�
 
 /** 各部分的元信息，供 ai_assist_context 的 index 分支使用 */
 export const AI_ASSIST_PARTS: { key: string; title: string; chars: number; desc: string }[] = [
+  { key: 'capabilities', title: '★ 能力宣言（你有什么能力）', chars: CAPABILITY_MANIFEST.length,
+    desc: '连上就该先看这个 —— 你有一整套能力，不是只会发消息' },
   { key: 'prompt', title: 'AI帮写 系统提示词', chars: AI_ASSIST_SYSTEM_PROMPT.length,
     desc: 'AI帮写 的身份设定与工具调用规则，原文' },
   { key: 'tools', title: 'AI帮写 29 个工具', chars: AI_ASSIST_TOOLS_MD.length,
@@ -44,7 +55,10 @@ export const AI_ASSIST_PARTS: { key: string; title: string; chars: number; desc:
 
 /** 把多个部分拼成一段可直接塞进上下文的大文本 */
 export function buildAiAssistContext(part: string): string {
-  const p = (part || 'index').toLowerCase();
+  // ★ 默认返回能力宣言，不是清单。
+  //   用户要的是「连上就知道自己有什么能力」，不是「连上先看目录」。
+  const p = (part || 'capabilities').toLowerCase();
+  if (p === 'capabilities') return CAPABILITY_MANIFEST;
   if (p === 'prompt') return AI_ASSIST_SYSTEM_PROMPT;
   if (p === 'tools') return AI_ASSIST_TOOLS_MD;
   if (p === 'skills') {
@@ -58,7 +72,9 @@ export function buildAiAssistContext(part: string): string {
       + '\n\n===== Prism 工具箱 · 词库插件开发文档 =====\n\n' + PRISM_WORDBANK_DEV_DOC;
   }
   if (p === 'all') {
-    return '===== AI帮写 系统提示词（原文） =====\n\n' + AI_ASSIST_SYSTEM_PROMPT
+    // 能力宣言排最前 —— 先知道自己能干什么，再看具体知识
+    return '===== ★ 能力宣言（你有什么能力） =====\n\n' + CAPABILITY_MANIFEST
+      + '\n\n===== AI帮写 系统提示词（原文） =====\n\n' + AI_ASSIST_SYSTEM_PROMPT
       + '\n\n===== AI帮写 29 个内置工具 =====\n\n' + AI_ASSIST_TOOLS_MD
       + '\n\n' + buildAiAssistContext('skills')
       + '\n\n' + buildAiAssistContext('plugin_doc');
@@ -66,5 +82,6 @@ export function buildAiAssistContext(part: string): string {
   // index
   return AI_ASSIST_PARTS
     .map((x) => `- ${x.key}（${x.chars} 字符）：${x.title} —— ${x.desc}`)
-    .join('\n');
+    .join('\n')
+    + '\n\n（不传 part 时默认返回 capabilities，即能力宣言）';
 }

@@ -886,7 +886,8 @@ export default {
       //   接口给不了。搬到云端后，不依赖云手机在线就能取。
       //   MCP 那边有对应的 ai_assist_context 工具，这里是给网页/脚本用的。
       //
-      //     GET /api/v1/ai-assist/context               → 各部分清单（默认）
+      //     GET /api/v1/ai-assist/context               → 能力宣言（默认）
+      //     GET /api/v1/ai-assist/context?part=index    → 各部分清单
       //     GET /api/v1/ai-assist/context?part=prompt   → 系统提示词
       //     GET /api/v1/ai-assist/context?part=tools    → 29 个工具
       //     GET /api/v1/ai-assist/context?part=skills   → 基岩版指令 + FMbe
@@ -895,8 +896,8 @@ export default {
       //     GET /api/v1/ai-assist/context?part=index&json=1 → 结构化清单
       // --------------------------------------------------------
       if (path === '/api/v1/ai-assist/context' && req.method === 'GET') {
-        const part = (url.searchParams.get('part') || 'index').toLowerCase();
-        const valid = ['index', 'prompt', 'tools', 'skills', 'plugin_doc', 'all'];
+        const part = (url.searchParams.get('part') || 'capabilities').toLowerCase();
+        const valid = ['capabilities', 'index', 'prompt', 'tools', 'skills', 'plugin_doc', 'all'];
         if (!valid.includes(part)) {
           return fail(`part 只能是 ${valid.join(' / ')}`, 400);
         }
