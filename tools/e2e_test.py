@@ -34,6 +34,12 @@ PASS = 0
 FAIL = 0
 RESULTS = []
 
+# ★ 自测注册的设备必须带这个前缀，且**绝不能**跟用户真机重名。
+#   旧版这里注册的名字叫「云手机1号」，和用户真机一模一样 ——
+#   测试只删了第二台、没删第一台，于是每跑一次就多一个幽灵设备，
+#   控制台里和真机混在一起，根本分不出哪个是真的。
+TEST_DEV_PREFIX = "e2e自测-"
+
 
 def chk(name, cond, extra=""):
     global PASS, FAIL
@@ -108,9 +114,23 @@ def main():
     if d.get("prism_error"):
         print(f"        prism_error={d.get('prism_error')}")
 
+    # ---- 1.5 清扫上次残留的自测设备（中途崩过就会留下）----
+    # ★ 必须带 ?all=1：默认列表会过滤掉停用设备，而残留的正是被软删（status=0）的，
+    #   不带 all 就一个都扫不到，清扫等于没写。
+    # 用硬删除：这些是一次性的自测设备，没必要在库里留停用记录。
+    swept = 0
+    s, r = call("GET", "/devices?all=1", headers=AUTH)
+    if s == 200:
+        for dv in (unwrap(r).get("devices") or []):
+            if str(dv.get("name", "")).startswith(TEST_DEV_PREFIX):
+                if call("DELETE", f"/devices/{dv.get('id')}?hard=1", headers=AUTH)[0] == 200:
+                    swept += 1
+    if swept:
+        print(f"        （清扫了 {swept} 个上次残留的自测设备）")
+
     # ---- 2. 注册被控端 ----
     s, r = call("POST", "/device/register", {
-        "name": "云手机1号", "platform": "android",
+        "name": TEST_DEV_PREFIX + "A", "platform": "android",
         "prism_url": "http://127.0.0.1:8080",
         "meta": {"model": "Redfinger", "android": "9"},
     })
@@ -261,7 +281,7 @@ def main():
         f"status={s} {r}")
 
     # ---- 13. 多设备 ----
-    s, r = call("POST", "/device/register", {"name": "云手机2号", "platform": "android"})
+    s, r = call("POST", "/device/register", {"name": TEST_DEV_PREFIX + "B", "platform": "android"})
     d2 = unwrap(r)
     d2id = d2.get("device_id")
     chk("27 第二台设备可注册", s == 200 and d2id, f"status={s} {r}")
@@ -275,9 +295,22 @@ def main():
     chk("29 离线设备拒发指令(409)", s == 409, f"status={s} {r}")
 
     # ---- 15. 清理 ----
+    # ★ 这里故意走**默认**（软）删除，因为那才是用户点「删除」走的路径；
+    #   然后断言设备真的从列表里消失了 —— 这才是「删除」对用户该有的语义。
+    #   （旧版只删了第二台，第一台永远留着；而且软删除后列表不过滤停用设备，
+    #     所以「删成功」了却还在列表里，攒出一堆幽灵设备。）
     if not a.keep:
-        s, _ = call("DELETE", f"/devices/{d2id}", headers=AUTH)
-        chk("30 删除设备成功", s == 200, f"status={s}")
+        s1, _ = call("DELETE", f"/devices/{d2id}", headers=AUTH)
+        s2, _ = call("DELETE", f"/devices/{did}", headers=AUTH)
+        chk("30 自测设备删除成功", s1 == 200 and s2 == 200, f"A={s1} B={s2}")
+        s, r = call("GET", "/devices", headers=AUTH)
+        left = [x.get("name") for x in (unwrap(r).get("devices") or [])
+                if str(x.get("name", "")).startswith(TEST_DEV_PREFIX)]
+        chk("31 删除后不再出现在列表里", not left, f"残留={left}")
+        # 断言完「软删除后列表要隐藏」这个用户可见的契约，再把行真正清掉，
+        # 免得库里攒一堆 status=0 的自测残留。
+        for _id in (d2id, did):
+            call("DELETE", f"/devices/{_id}?hard=1", headers=AUTH)
 
     print("=" * 60)
     print(f"  结果: 通过 {PASS} / {PASS + FAIL}    耗时 {time.time() - t0:.1f}s")

@@ -3,7 +3,20 @@
 # Cloudflare Workers 配置
 #
 # 部署：wrangler deploy
-# 子域名：api.youyuanqi.dpdns.org
+# 线上：https://ai-api.youyuanqi.dpdns.org
+# ============================================================
+#
+# ★ 关于 name —— 改之前先读完这段：
+#   历史名字是 `ds-platform-ai-assist`，但那个 worker 在自定义域名上
+#   一直服务旧代码（新版部署上去了却不生效），换成现在这个名字才恢复。
+#   别再改回去，也别去动那个旧 worker —— 它已经不在任何路由上了。
+#
+# ★ 改名 = 换 worker，secret 不会跟着走！
+#   [vars] 写在文件里会跟着部署，但 secret（PLATFORM_ACCESS_KEY）是按 worker 名
+#   隔离的。改完名字必须补一句：
+#       wrangler secret put PLATFORM_ACCESS_KEY
+#   不补的话所有鉴权路由都会回「未授权」，看起来像「部署没生效」，非常难查。
+#
 # ============================================================
 
 name = "ds-ai-assist-v2"

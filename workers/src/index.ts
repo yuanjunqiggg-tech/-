@@ -705,7 +705,7 @@ async function health(req: Request, env: Env): Promise<Response> {
   let online = 0;
   try {
     const r = await env.DB.prepare(
-      'SELECT id, name, platform, status, last_seen FROM devices ORDER BY last_seen DESC LIMIT 50',
+      'SELECT id, name, platform, status, last_seen FROM devices WHERE status=1 ORDER BY last_seen DESC LIMIT 50',
     ).all<any>();
     const now = Date.now();
     devices = (r.results || []).map((d: any) => {

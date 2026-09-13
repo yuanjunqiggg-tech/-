@@ -53,4 +53,3 @@ agent/agent_state.json
 
 # wrangler dry-run 输出
 workers/tmp/
-workers/wrangler.toml.bak

@@ -428,11 +428,15 @@ export async function deviceReport(req: Request, env: DeviceEnv): Promise<Respon
 /** 设备列表（带在线判定） */
 export async function listDevices(req: Request, env: DeviceEnv, url: URL): Promise<Response> {
   if (!checkAdmin(req, env)) return jfail('未授权', 401);
+  // ★ 默认只看启用中的设备。DELETE 是软删除（status 置 0），
+  //   不过滤的话「删掉」的设备还会留在控制台和 list_devices 里 ——
+  //   用户看到的就是一台删不掉的幽灵设备。要连停用的一起看，加 ?all=1。
+  const showAll = url.searchParams.get('all') === '1';
   const rows = await env.DB.prepare(
     `SELECT id, name, platform, model, android_ver, app_ver, prism_port,
             prism_online, bot_connected, bot_server, battery, ip_hint, memo,
             bot_keeper_mode, status, last_seen, created_at
-     FROM devices ORDER BY last_seen DESC LIMIT 200`,
+     FROM devices ${showAll ? '' : 'WHERE status=1'} ORDER BY last_seen DESC LIMIT 200`,
   ).all<any>();
 
   const now = Date.now();

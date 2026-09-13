@@ -270,7 +270,7 @@ async function callTool(env: any, name: string, args: any): Promise<any> {
 
   if (name === 'list_devices') {
     const r = await db
-      .prepare('SELECT id, name, platform, status, last_seen, created_at FROM devices ORDER BY last_seen DESC LIMIT 100')
+      .prepare('SELECT id, name, platform, status, last_seen, created_at FROM devices WHERE status=1 ORDER BY last_seen DESC LIMIT 100')
       .all<any>();
     const now = Date.now();
     return {
