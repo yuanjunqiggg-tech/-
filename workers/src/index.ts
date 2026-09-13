@@ -1004,9 +1004,35 @@ export default {
           .bind(evCut)
           .run();
 
+        // ------------------------------------------------------
+        // 僵尸设备清理（可选，默认不做）
+        //   /api/v1/admin/cleanup?devices=1&offline_minutes=1440
+        // 开发期间反复注册会留下一堆假在线的设备，控制台看着很乱。
+        // 默认 24h 才删，很保守：真被控端断了超过一天，重开也会重新注册。
+        // ------------------------------------------------------
+        let deadDevices = 0;
+        if (url.searchParams.get('devices') === '1') {
+          const offMins = Math.min(
+            Math.max(parseInt(url.searchParams.get('offline_minutes') || '1440', 10) || 1440, 1),
+            60 * 24 * 30,
+          );
+          const offCut = Date.now() - offMins * 60_000;
+          await env.DB.prepare('DELETE FROM device_events WHERE device_id IN (SELECT id FROM devices WHERE last_seen < ?)')
+            .bind(offCut)
+            .run();
+          await env.DB.prepare('DELETE FROM device_commands WHERE device_id IN (SELECT id FROM devices WHERE last_seen < ?)')
+            .bind(offCut)
+            .run();
+          const dd = await env.DB.prepare('DELETE FROM devices WHERE last_seen < ?')
+            .bind(offCut)
+            .run();
+          deadDevices = dd.meta?.changes ?? 0;
+        }
+
         return ok({
           stale_commands_closed: stale.meta?.changes ?? 0,
           old_events_deleted: ev.meta?.changes ?? 0,
+          dead_devices_deleted: deadDevices,
           cutoff_minutes: mins,
         }, '清理完成');
       }
