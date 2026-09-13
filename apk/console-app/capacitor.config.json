@@ -1,0 +1,14 @@
+{
+  "appId": "com.prism.console",
+  "appName": "Prism 控制台",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://prism-console-7v1.pages.dev/",
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

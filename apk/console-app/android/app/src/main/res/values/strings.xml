@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Prism 控制台</string>
+    <string name="title_activity_main">Prism 控制台</string>
+    <string name="package_name">com.prism.console</string>
+    <string name="custom_url_scheme">com.prism.console</string>
+</resources>

@@ -41,3 +41,6 @@ tools/captured_prompts/*.json
 # 系统
 .DS_Store
 Thumbs.db
+
+# APK 分发副本（构建产物，不入库）
+apk/dist/
