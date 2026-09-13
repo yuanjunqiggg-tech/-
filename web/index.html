@@ -235,6 +235,33 @@
           <div id="deviceList"><div class="empty">加载中…</div></div>
         </div>
         <div class="card">
+          <h3>Prism 引擎状态</h3>
+          <p style="font-size:13px;color:var(--dim);margin:0 0 10px">
+            查的是当前设备里 <b>Prism 本体</b>的状态：APK 装没装、8080 响不响应、机器人连没连。
+            被控端每次执行指令前会自动拉起它，这里只是给你看一眼。
+          </p>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="tbtn" onclick="checkPrism()">检查</button>
+            <span id="prismState" style="font-size:13px;color:var(--dim)">未检查</span>
+          </div>
+          <pre id="prismOut" style="background:var(--bg);padding:10px;border-radius:8px;
+               font-size:12px;overflow-x:auto;color:var(--dim);margin:10px 0 0;display:none"></pre>
+        </div>
+
+        <div class="card">
+          <h3>AI帮写 会话（存在 Prism 里）</h3>
+          <p style="font-size:13px;color:var(--dim);margin:0 0 10px">
+            这些会话存在 <b>Prism 自己的存储</b>里，不是网页的。
+            你在云手机上打开 Prism → AI帮写，看到的是同一份。
+          </p>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+            <button class="tbtn" onclick="loadAiSessions()">刷新列表</button>
+            <button class="tbtn" onclick="loadAiSessions(true)">只看最近</button>
+          </div>
+          <div id="aiSessions"><div class="empty">点「刷新列表」</div></div>
+        </div>
+
+        <div class="card">
           <h3>接入一台新设备</h3>
           <p style="font-size:13px;color:var(--dim);margin:0 0 10px">
             在被控端机器上打开下面这个链接，密钥和网关地址已经填好，点「绑定设备」即可。
@@ -418,8 +445,17 @@
    状态
 ============================================================ */
 var S = {
+/* ------------------------------------------------------------
+   内置默认值 —— 让控制台「打开即用」，不用手动填网关和密钥。
+   localStorage 优先，用户在「设置」里改过就以他的为准。
+
+   ⚠ 安全取舍：这是你自己部署的网关密钥，且写在了公开可访问的
+     静态站点里。任何拿到控制台链接的人都能拿到这把钥匙
+     （等同于 Prism 的全部控制权）。图方便就这样；
+     要收紧就把下面 BUILTIN_KEY 清空，改成每次手动填。
+------------------------------------------------------------ */
   endpoint: localStorage.getItem('dsai_endpoint') || 'https://ai-api.youyuanqi.dpdns.org',
-  key:      localStorage.getItem('dsai_key') || '',
+  key:      localStorage.getItem('dsai_key') || '5dc5ad3751b01175e3e02a6f01ccc8cf0c32142d89345c62fd10af993ff71791',
   pluginId: localStorage.getItem('dsai_plugin') || 'ds_ai_agent',
   model:    localStorage.getItem('dsai_model') || '',
   session:  null,
@@ -647,6 +683,112 @@ function pickDevice(id){
   toast('已切换当前设备','ok');
   loadDevices();
 }
+// ============================================================
+// Prism 引擎状态 + AI帮写 会话（控制台「设备」页）
+// ============================================================
+//
+// 这两个查的都是 **Prism 本体里的数据**，不是我们云端的表：
+//   prism_status      → 被控端所在机器里 Prism 装没装、8080 活不活
+//   AI帮写 会话        → 存在 Prism 自己的存储里
+//                       （用户在云手机打开 Prism → AI帮写 看到的是同一份）
+// ============================================================
+async function checkPrism(){
+  var st = $('prismState'), out = $('prismOut');
+  st.textContent = '检查中…';
+  out.style.display = 'none';
+  try {
+    var r = await api('/api/v1/prism/status', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ device_id: S.deviceId || undefined }),
+    });
+    var d = r.data || r;
+    var res = d.result || {};
+    var nat = res.native || {};
+    var bot = res.bot || {};
+    var alive = nat.alive === true;
+    st.innerHTML = alive
+      ? '<span style="color:var(--ok)">● Prism 运行中</span>（8080 有响应 · ' + (res.port||8080) + '）'
+      : '<span style="color:var(--err)">● Prism 未运行</span>（8080 无响应）';
+    out.style.display = 'block';
+    out.textContent = JSON.stringify({
+      已安装: nat.installed, 端口: res.port, 引擎响应: nat.alive,
+      机器人已连接: bot.bot_connected, 设备: d.device_name || d.device_id,
+    }, null, 2);
+  } catch(e){
+    st.innerHTML = '<span style="color:var(--err)">检查失败</span>';
+    out.style.display = 'block';
+    out.textContent = e.message || String(e);
+  }
+}
+
+async function loadAiSessions(recent){
+  var box = $('aiSessions');
+  box.innerHTML = '<div class="empty">加载中…</div>';
+  try {
+    var r = await api('/api/v1/prism/sessions', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'list', recent: !!recent,
+                             device_id: S.deviceId || undefined }),
+    });
+    var d = r.data || r;
+    var res = d.result || {};
+    var list = res.sessions || res.data || [];
+    if (!list.length) {
+      box.innerHTML = '<div class="empty">Prism 里还没有会话。' +
+        '用 prism_chat 带 session_name 聊一次就会出现在这里。</div>';
+      return;
+    }
+    box.innerHTML = list.map(function(n){
+      var name = (typeof n === 'string') ? n : (n.name || JSON.stringify(n));
+      return '<div class="card" style="margin-bottom:6px;padding:10px">' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<b style="font-size:13px">' + esc(name) + '</b>' +
+          '<span class="spacer" style="flex:1"></span>' +
+          '<button class="tbtn" onclick="viewAiSession(' +
+            JSON.stringify(name).replace(/"/g,'&quot;') + ')">查看</button>' +
+          '<button class="tbtn" onclick="delAiSession(' +
+            JSON.stringify(name).replace(/"/g,'&quot;') + ')">删除</button>' +
+        '</div></div>';
+    }).join('');
+  } catch(e){
+    box.innerHTML = '<div class="empty" style="color:var(--err)">' +
+      '加载失败：' + esc(e.message) + '</div>';
+  }
+}
+
+async function viewAiSession(name){
+  try {
+    var r = await api('/api/v1/prism/sessions', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'load', session_name:name,
+                             device_id: S.deviceId || undefined }),
+    });
+    var res = (r.data || r).result || {};
+    var msgs = res.messages || [];
+    if (!msgs.length) { toast('这个会话是空的','err'); return; }
+    alert(msgs.map(function(m){
+      return (m.role === 'user' ? '【我】' : '【AI】') + '\n' + (m.content || '');
+    }).join('\n\n—————\n\n').slice(0, 6000));
+  } catch(e){ toast('读取失败：' + e.message, 'err'); }
+}
+
+async function delAiSession(name){
+  if (!confirm('删除 Prism 里的会话「' + name + '」？此操作不可恢复。')) return;
+  try {
+    await api('/api/v1/prism/sessions', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'delete', session_name:name,
+                             device_id: S.deviceId || undefined }),
+    });
+    toast('已删除','ok');
+    loadAiSessions();
+  } catch(e){ toast(e.message,'err'); }
+}
+
 async function delDevice(id){
   if (!confirm('删除这台设备？被控端需要重新绑定才能再次接入。')) return;
   try {

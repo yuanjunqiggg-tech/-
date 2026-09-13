@@ -898,6 +898,39 @@ export default {
         return mcpToolCatalog();
       }
 
+      // ------------------------------------------------------------
+      // Prism 引擎自检（控制台「设备」页用）
+      // 查的是被控端所在机器里 Prism 本体的状态：装没装、8080 活不活
+      // ------------------------------------------------------------
+      if (path === '/api/v1/prism/status' && (req.method === 'POST' || req.method === 'GET')) {
+        let b: any = {};
+        try { b = await req.json(); } catch { /* GET 无体 */ }
+        const r = await runOnDevice(env.DB, b.device_id, 'prism_status', {});
+        return ok(r);
+      }
+
+      // ------------------------------------------------------------
+      // AI帮写 会话（数据存在 Prism 自己的存储里，不是网页的）
+      // ------------------------------------------------------------
+      if (path === '/api/v1/prism/sessions' && req.method === 'POST') {
+        let b: any = {};
+        try { b = await req.json(); } catch { return fail('请求体必须是 JSON'); }
+        const act = (b.action || 'list').toString().toLowerCase();
+        const map: Record<string, string> = {
+          list: 'session_list', load: 'session_load',
+          save: 'session_save', delete: 'session_delete',
+        };
+        const kind = map[act];
+        if (!kind) return fail('action 只支持 list/load/save/delete');
+        const r = await runOnDevice(env.DB, b.device_id, kind, {
+          session_name: b.session_name,
+          messages: b.messages,
+          plugin_id: b.plugin_id,
+          recent: !!b.recent,
+        });
+        return ok(r);
+      }
+
       // 通用工具调用入口：驱动 Prism AI 执行任意工具
       if (path === '/api/v1/mcp/tool' && req.method === 'POST') {
         let b: any = {};

@@ -181,6 +181,39 @@ def main():
               str(r)[:300])
 
         print()
+        print("-- 控制台用的新路由：/api/v1/prism/status --")
+        st, txt = http("/api/v1/prism/status", "POST", {}, timeout=90)
+        try:
+            j = json.loads(txt)
+        except Exception:
+            j = {}
+        d2 = j.get("data") or {}
+        r2 = d2.get("result") or {}
+        check("prism/status 返回 200", st == 200 and j.get("ok") is True, txt[:250])
+        check("prism/status 带回 8080 探活结果",
+              ((r2.get("native") or {}).get("alive")) is True, txt[:300])
+
+        print()
+        print("-- 控制台用的新路由：/api/v1/prism/sessions --")
+        st, txt = http("/api/v1/prism/sessions", "POST",
+                       {"action": "save", "session_name": "控制台-自测",
+                        "messages": [{"role": "user", "content": "hi"}]}, timeout=90)
+        j = json.loads(txt)
+        check("sessions save 成功", (j.get("data") or {}).get("ok") is True, txt[:250])
+
+        st, txt = http("/api/v1/prism/sessions", "POST",
+                       {"action": "list"}, timeout=90)
+        j = json.loads(txt)
+        names = ((j.get("data") or {}).get("result") or {}).get("sessions")
+        check("sessions list 能看到刚存的",
+              isinstance(names, list) and "控制台-自测" in names, txt[:300])
+
+        st, txt = http("/api/v1/prism/sessions", "POST",
+                       {"action": "delete", "session_name": "控制台-自测"}, timeout=90)
+        j = json.loads(txt)
+        check("sessions delete 成功", (j.get("data") or {}).get("ok") is True, txt[:250])
+
+        print()
         print("-- 控制台同源的 /api/v1/mcp/tool --")
         st, txt = http("/api/v1/mcp/tool", "POST",
                        {"tool_name": "status"}, timeout=90)
