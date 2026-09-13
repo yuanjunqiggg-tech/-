@@ -945,6 +945,39 @@ export default {
         return packetSubscribe(req, env);
       }
 
+      // --------------------------------------------------------
+      // 运维：清理腐烂的指令 + 过期事件
+      //   GET/POST /api/v1/admin/cleanup?minutes=60
+      //   被控端掉线时指令会卡在 pending/taken，不清理会一直堆积
+      // --------------------------------------------------------
+      if (path === '/api/v1/admin/cleanup') {
+        const mins = Math.min(
+          Math.max(parseInt(url.searchParams.get('minutes') || '60', 10) || 60, 1),
+          60 * 24 * 7,
+        );
+        const cutoff = Date.now() - mins * 60_000;
+
+        const stale = await env.DB.prepare(
+          `UPDATE device_commands
+             SET status='failed', error='超时未执行（自动清理）', finished_at=?
+           WHERE status IN ('pending','taken') AND created_at < ?`,
+        )
+          .bind(Date.now(), cutoff)
+          .run();
+
+        // 事件流只保留 7 天，避免 D1 无限膨胀
+        const evCut = Date.now() - 7 * 24 * 3600_000;
+        const ev = await env.DB.prepare('DELETE FROM device_events WHERE created_at < ?')
+          .bind(evCut)
+          .run();
+
+        return ok({
+          stale_commands_closed: stale.meta?.changes ?? 0,
+          old_events_deleted: ev.meta?.changes ?? 0,
+          cutoff_minutes: mins,
+        }, '清理完成');
+      }
+
       return fail(`未找到路由: ${path}`, 404);
     } catch (e: any) {
       console.error('handler error:', e);

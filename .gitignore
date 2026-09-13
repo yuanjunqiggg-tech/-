@@ -44,3 +44,9 @@ Thumbs.db
 
 # APK 分发副本（构建产物，不入库）
 apk/dist/
+
+# PyInstaller 产物（9MB 二进制，不入库；需要时用 tools 里的脚本重新打包）
+agent/dist/
+agent/build/
+agent/prism-agent.spec
+agent/agent_state.json

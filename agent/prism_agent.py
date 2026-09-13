@@ -43,6 +43,33 @@ import urllib.parse
 import urllib.request
 
 # ------------------------------------------------------------
+# ★ Windows 控制台默认 GBK，日志里的 ✓ / ✗ / ▶ 会直接 UnicodeEncodeError
+#   把打包成 exe 的进程干掉。这里强制 UTF-8 输出。
+# ------------------------------------------------------------
+def _force_utf8_console():
+    for stream_name in ("stdout", "stderr"):
+        s = getattr(sys, stream_name, None)
+        try:
+            if s and hasattr(s, "reconfigure"):
+                s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if getattr(sys.stdout, "encoding", "").lower() not in ("utf-8", "utf8"):
+        try:
+            import io
+            sys.stdout = io.TextIOWrapper(
+                sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True
+            )
+            sys.stderr = io.TextIOWrapper(
+                sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True
+            )
+        except Exception:
+            pass
+
+
+_force_utf8_console()
+
+# ------------------------------------------------------------
 # 配置
 # ------------------------------------------------------------
 def _normalize_gateway(u: str) -> str:
@@ -62,7 +89,34 @@ GATEWAY = _normalize_gateway(os.environ.get("PRISM_GATEWAY", "https://ai-api.you
 PRISM_URL = os.environ.get("PRISM_URL", "http://127.0.0.1:8080").rstrip("/")
 # Prism 地址也可能被误填带后缀，做同样处理
 PRISM_URL = re.sub(r"/(api|api/v1)$", "", PRISM_URL)
-STATE_PATH = os.environ.get("AGENT_STATE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_state.json"))
+def _default_state_path() -> str:
+    """
+    状态文件（device_id + token）必须落在**稳定**的位置。
+
+    ★ 踩过的坑：打成一文件 exe 后，os.path.dirname(__file__) 指向 PyInstaller
+      的临时解压目录（_MEIxxxxxx），进程一退出就没了 —— 结果每次启动都当新设备
+      重新注册一台，云端设备列表被刷爆。
+
+      正确做法：
+        - 冻结版（exe）→ 放 exe 同目录（若可写），否则 %LOCALAPPDATA%
+        - 脚本版 → 放脚本同目录
+    """
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        probe = os.path.join(exe_dir, "agent_state.json")
+        try:
+            with open(probe, "a"):
+                pass
+            return probe
+        except Exception:
+            base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+            d = os.path.join(base, "PrismAgent")
+            os.makedirs(d, exist_ok=True)
+            return os.path.join(d, "agent_state.json")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent_state.json")
+
+
+STATE_PATH = os.environ.get("AGENT_STATE", _default_state_path())
 
 # 本机 Prism 走直连；云端网关默认也直连（避免系统代理劫持 127.0.0.1 造成 502）
 os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
